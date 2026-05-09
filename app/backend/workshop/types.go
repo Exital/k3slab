@@ -1,0 +1,38 @@
+package workshop
+
+// StepType identifies workshop step kinds.
+type StepType string
+
+const (
+	StepQuestion StepType = "question"
+	StepTask     StepType = "task"
+)
+
+// AnswerType for question steps.
+type AnswerType string
+
+const (
+	AnswerText         AnswerType = "text"
+	AnswerSingleChoice AnswerType = "single_choice"
+)
+
+// Step is a normalized workshop step (question or task).
+type Step struct {
+	ID                string     `json:"id"`
+	Type              StepType   `json:"type"`
+	Title             string     `json:"title"`
+	Description       string     `json:"description,omitempty"`
+	AnswerType        AnswerType `json:"answer_type,omitempty"`
+	Options           []string   `json:"options,omitempty"`
+	IncorrectMessage  string     `json:"incorrect_message,omitempty"` // question: shown when verify fails; optional
+	Setup             []string   `json:"-"`                           // commands, not exposed as JSON in raw form
+	Verify            string     `json:"-"`
+	Hints             []string   `json:"hints,omitempty"`
+	Run               string     `json:"-"`
+}
+
+// Workshop is the parsed workshop.yml root.
+type Workshop struct {
+	Name  string `json:"name"`
+	Steps []Step `json:"steps"`
+}
