@@ -10,7 +10,7 @@ echo "[k3slab] Starting K3s server..."
 : "${K3SLAB_K3S_SNAPSHOTTER:=native}"
 k3s server \
   --write-kubeconfig-mode 644 \
-  --bind-address 127.0.0.1 \
+  --bind-address 0.0.0.0 \
   --https-listen-port 6443 \
   --disable-network-policy \
   --disable=metrics-server \
