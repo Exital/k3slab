@@ -31,8 +31,18 @@ type Step struct {
 	Run               string     `json:"-"`
 }
 
+// SidebarTab is reference markdown shown in the UI sidebar (not a progression step).
+// Icon is a Material Symbols icon name (e.g. "description", "menu_book"); omit for a UI default.
+type SidebarTab struct {
+	ID      string `json:"id"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+	Icon    string `json:"icon,omitempty"`
+}
+
 // Workshop is the parsed workshop.yml root.
 type Workshop struct {
-	Name  string `json:"name"`
-	Steps []Step `json:"steps"`
+	Name         string       `json:"name"`
+	Steps        []Step       `json:"steps"`
+	SidebarTabs  []SidebarTab `json:"sidebarTabs"`
 }

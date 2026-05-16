@@ -1,6 +1,15 @@
 export type StepType = "question" | "task";
 export type AnswerType = "text" | "single_choice";
 
+/** Sidebar reference tab from workshop `tabs.markdowns` (Material Symbols icon name in `icon`). */
+export type SidebarTab = {
+  id: string;
+  title: string;
+  content: string;
+  /** Material Symbols icon id, e.g. `description`, `info`. */
+  icon?: string;
+};
+
 export type CurrentStep = {
   id: string;
   type: StepType;
@@ -27,6 +36,7 @@ export type WorkshopState = {
   lastSetupLogs?: string;
   lastVerifyLogs?: string;
   lastTaskLogs?: string;
+  sidebarTabs?: SidebarTab[];
 };
 
 export async function getWorkshop(): Promise<WorkshopState> {

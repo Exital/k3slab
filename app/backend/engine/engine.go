@@ -79,9 +79,10 @@ type Snapshot struct {
 	CurrentQuestionNumber int          `json:"currentQuestionNumber"` // 0 on task or when done; 1-based on active question
 	Done                  bool         `json:"done"`
 	Current               *CurrentStep `json:"current,omitempty"`
-	LastSetupLogs         string       `json:"lastSetupLogs,omitempty"`
-	LastVerifyLogs        string       `json:"lastVerifyLogs,omitempty"`
-	LastTaskLogs          string       `json:"lastTaskLogs,omitempty"`
+	LastSetupLogs         string               `json:"lastSetupLogs,omitempty"`
+	LastVerifyLogs        string               `json:"lastVerifyLogs,omitempty"`
+	LastTaskLogs          string               `json:"lastTaskLogs,omitempty"`
+	SidebarTabs           []workshop.SidebarTab `json:"sidebarTabs,omitempty"`
 }
 
 type CurrentStep struct {
@@ -120,6 +121,7 @@ func (e *Engine) Snapshot() Snapshot {
 		LastSetupLogs:         e.lastSetup.String(),
 		LastVerifyLogs:        e.lastVerify.String(),
 		LastTaskLogs:          e.lastTaskOut.String(),
+		SidebarTabs:           append([]workshop.SidebarTab(nil), e.w.SidebarTabs...),
 	}
 	if done || e.current < 0 || e.current >= total {
 		return snap

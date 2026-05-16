@@ -67,18 +67,47 @@ docker run --rm --name k3slab \
 
 ## Writing workshops (`workshop.yml`)
 
-The UI loads **`workshop.yml`** from the lab directory (default **`/lab/k3s`** in the image, or your mount path). The file describes a linear sequence of **steps** learners complete in order.
+The UI loads **`workshop.yml`** from the lab directory (default **`/lab/k3s`** in the image, or your mount path). The workshop defines a linear sequence of **`tabs.steps`** (tasks and questions) plus optional **`tabs.markdowns`** panels shown in the sidebar.
 
 ### Top-level fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Workshop title shown in the UI header. |
-| `steps` | Yes | Non-empty list of steps (see below). |
+| `tabs` | Yes* | Object with `steps` (progression) and optional `markdowns` (sidebar). |
+| `steps` | Yes* | **Legacy only:** top-level list of task/question steps if `tabs` is not used. Do not combine with `tabs.steps`. |
+
+\*Provide either **`tabs.steps`** (preferred) or legacy **`steps`**, non-empty.
+
+### `tabs` shape
+
+```yaml
+name: My workshop
+
+tabs:
+  steps:
+    - id: my-task
+      type: task
+      title: ...
+      run: ...
+    - id: my-question
+      type: question
+      ...
+  markdowns:
+    - id: cheat-sheet          # optional; generated from title if omitted
+      title: Cheat sheet
+      icon: description         # optional Material Symbols name (e.g. info, menu_book)
+      content: |
+        # Markdown
+        ...
+```
+
+- **`tabs.steps`**: ordered list of **`task`** and **`question`** entries (same rules as the step types below).
+- **`tabs.markdowns`**: optional ordered list of reference panels. Each entry needs **`title`** and **`content`** (Markdown). Optional **`id`** (stable key for the UI). Optional **`icon`**: a [Material Symbols](https://fonts.google.com/icons) icon id (e.g. `description`, `info`); if omitted, the UI uses a default icon.
 
 ### Step types
 
-Each step **must** have a unique string `id` and a `type` of either **`task`** or **`question`**.
+Each step in **`tabs.steps`** (or legacy **`steps`**) **must** have a unique string `id` and a `type` of either **`task`** or **`question`**.
 
 #### `task` — automated setup
 
@@ -143,7 +172,25 @@ Rough guardrails: **task** and **question setup** up to about **10 minutes** eac
 
 ### Minimal examples
 
-**Task step:**
+Full file structure with **`tabs`**:
+
+```yaml
+name: Example
+
+tabs:
+  steps:
+    - id: prep-cluster
+      type: task
+      title: Seed demo data
+      run: bash scripts/setup.sh
+  markdowns:
+    - title: Tips
+      icon: menu_book
+      content: |
+        Try `kubectl get nodes`.
+```
+
+**Task step** (inside `tabs.steps` or legacy `steps`):
 
 ```yaml
 - id: prep-cluster
@@ -152,7 +199,7 @@ Rough guardrails: **task** and **question setup** up to about **10 minutes** eac
   run: bash scripts/setup.sh
 ```
 
-**Text question with setup and hints:**
+**Text question** (inside `tabs.steps` or legacy `steps`):
 
 ```yaml
 - id: q-namespace
@@ -170,7 +217,7 @@ Rough guardrails: **task** and **question setup** up to about **10 minutes** eac
     - "Read the NAMESPACE column for that row"
 ```
 
-**Single choice with custom wrong-answer copy:**
+**Single choice** with custom wrong-answer copy:
 
 ```yaml
 - id: q-svc
@@ -190,7 +237,7 @@ A full working file ships as [lab/k3s/workshop.yml](lab/k3s/workshop.yml). Mount
 
 ## API (same origin as UI)
 
-- `GET /api/workshop` — current step and metadata  
+- `GET /api/workshop` — current step and metadata (includes `sidebarTabs` from `tabs.markdowns`)  
 - `POST /api/workshop/restart` — reset workshop progress to the beginning (in-memory)  
 - `POST /api/task/run` — run the current **task** step  
 - `POST /api/question/setup` — run **setup** for the current question  

@@ -139,6 +139,7 @@ export default function App() {
   const [answer, setAnswer] = useState("");
   const [verifyOutcome, setVerifyOutcome] = useState<VerifyOutcome>("idle");
   const [hintCount, setHintCount] = useState(0);
+  const [sidebarView, setSidebarView] = useState<"workshop" | string>("workshop");
 
   useEffect(() => {
     try {
@@ -265,6 +266,7 @@ export default function App() {
       setHintCount(0);
       setAnswer("");
       autoKey.current = "";
+      setSidebarView("workshop");
     } catch (e) {
       setActionErr(String(e));
     }
@@ -296,6 +298,19 @@ export default function App() {
     return { line1: `Question ${cq} / ${tq}`, line2: state.name, pct };
   }, [state]);
 
+  const markdownTab = useMemo(() => {
+    if (sidebarView === "workshop") return undefined;
+    return state?.sidebarTabs?.find((t) => t.id === sidebarView);
+  }, [state?.sidebarTabs, sidebarView]);
+
+  useEffect(() => {
+    if (sidebarView === "workshop") return;
+    const tabs = state?.sidebarTabs ?? [];
+    if (!tabs.some((t) => t.id === sidebarView)) {
+      setSidebarView("workshop");
+    }
+  }, [state?.sidebarTabs, sidebarView]);
+
   const overlayLabel = useMemo(() => {
     if (!busy || !current) return null;
     if (current.type === "task") return "Preparing environment…";
@@ -309,6 +324,9 @@ export default function App() {
 
   const navInactive =
     "rounded-lg px-3 py-2 text-slate-600 transition-colors hover:bg-slate-200/80 dark:text-k3-on-surface-variant dark:hover:bg-k3-surface-variant";
+
+  const navActive =
+    "flex w-full items-center gap-3 rounded-lg bg-k3-secondary-container px-3 py-2 text-left text-k3-on-secondary-container dark:bg-k3-secondary-container dark:text-k3-on-secondary-container";
 
   return (
     <div
@@ -350,7 +368,7 @@ export default function App() {
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Side nav — contextual lab (Stitch) */}
-        <aside className="hidden w-[280px] shrink-0 flex-col border-r border-slate-200 bg-slate-100 py-4 pl-2 pr-2 dark:border-k3-outline-variant dark:bg-k3-surface-low md:flex">
+        <aside className="hidden min-h-0 w-[280px] shrink-0 flex-col border-r border-slate-200 bg-slate-100 py-4 pl-2 pr-2 dark:border-k3-outline-variant dark:bg-k3-surface-low md:flex">
           <div className="mb-6 px-3">
             <div className="mb-1 flex items-center gap-2">
               <div className="h-2 w-full overflow-hidden rounded-full bg-slate-300 dark:bg-k3-surface-variant">
@@ -367,21 +385,28 @@ export default function App() {
               <p className="mt-0.5 text-sm text-slate-600 dark:text-k3-on-surface-variant">{progressMeta.line2}</p>
             )}
           </div>
-          <nav className="flex flex-1 flex-col gap-1">
-            <div className="flex items-center gap-3 rounded-lg bg-k3-secondary-container px-3 py-2 text-k3-on-secondary-container dark:bg-k3-secondary-container dark:text-k3-on-secondary-container">
+          <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
+            <button
+              type="button"
+              className={sidebarView === "workshop" ? navActive : `flex w-full items-center gap-3 text-left ${navInactive}`}
+              onClick={() => setSidebarView("workshop")}
+            >
               <MIcon name="quiz" />
               <span className="font-mono text-xs font-medium uppercase tracking-wider">Questions</span>
-            </div>
-            <button type="button" className={`flex w-full items-center gap-3 ${navInactive}`}>
-              <MIcon name="description" />
-              <span className="font-mono text-xs font-medium uppercase tracking-wider">Cheat sheet</span>
             </button>
-            <button type="button" className={`flex w-full items-center gap-3 ${navInactive}`}>
-              <MIcon name="info" />
-              <span className="font-mono text-xs font-medium uppercase tracking-wider">Lab info</span>
-            </button>
+            {(state?.sidebarTabs ?? []).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={sidebarView === t.id ? navActive : `flex w-full items-center gap-3 text-left ${navInactive}`}
+                onClick={() => setSidebarView(t.id)}
+              >
+                <MIcon name={t.icon?.trim() || "article"} />
+                <span className="font-mono text-xs font-medium tracking-wider">{t.title}</span>
+              </button>
+            ))}
           </nav>
-          <div className="mt-auto flex flex-col gap-1 border-t border-slate-200 pt-4 dark:border-k3-outline-variant">
+          <div className="mt-auto flex shrink-0 flex-col gap-1 border-t border-slate-200 pt-4 dark:border-k3-outline-variant">
             <button
               type="button"
               className={`flex w-full items-center gap-3 ${navInactive}`}
@@ -405,14 +430,14 @@ export default function App() {
         <PanelGroup direction="horizontal" className="min-h-0 min-w-0 flex-1">
           <Panel defaultSize={34} minSize={22} className="min-h-0 min-w-[240px]">
             <section className="relative flex h-full min-h-0 flex-col overflow-hidden border-r border-slate-200 bg-white dark:border-k3-outline-variant dark:bg-k3-surface">
-              {overlayLabel && (
+              {sidebarView === "workshop" && overlayLabel && (
                 <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-white/90 backdrop-blur-md dark:bg-k3-surface-lowest/90">
                   <span className="h-10 w-10 animate-spin rounded-full border-2 border-slate-200 border-t-k3-primary-container dark:border-k3-outline-variant dark:border-t-k3-secondary" />
                   <p className="text-sm font-medium text-slate-700 dark:text-k3-on-surface">{overlayLabel}</p>
                 </div>
               )}
 
-              {verifyOutcome === "success" && (
+              {sidebarView === "workshop" && verifyOutcome === "success" && (
                 <div className="k3-verify-enter flex shrink-0 items-center gap-3 border-b border-k3-secondary/20 bg-emerald-600/15 px-6 py-4 dark:bg-k3-secondary-container dark:text-k3-on-secondary-container">
                   <MIcon name="check_circle" className="text-2xl text-emerald-700 dark:text-k3-on-secondary-container" filled />
                   <span className="font-display text-lg font-semibold text-emerald-900 dark:text-k3-on-secondary-container">
@@ -420,7 +445,7 @@ export default function App() {
                   </span>
                 </div>
               )}
-              {verifyOutcome === "failure" && (
+              {sidebarView === "workshop" && verifyOutcome === "failure" && (
                 <div className="k3-verify-enter flex shrink-0 items-center gap-3 border-b border-rose-500/30 bg-rose-50 px-6 py-4 dark:border-k3-error-container dark:bg-k3-error-container/40 dark:text-k3-on-error-container">
                   <MIcon name="cancel" className="text-2xl text-rose-700 dark:text-k3-error" filled />
                   <span className="font-display text-lg font-semibold text-rose-900 dark:text-k3-on-error-container">
@@ -446,6 +471,20 @@ export default function App() {
                   </div>
                 )}
 
+                {sidebarView !== "workshop" && markdownTab ? (
+                  <div className="space-y-4">
+                    <p className="text-xs text-slate-500 dark:text-k3-on-surface-variant">
+                      Reference — choose <span className="font-medium text-k3-secondary">Questions</span> in the left bar to return to the lab step.
+                    </p>
+                    <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-900 dark:text-k3-on-background md:text-3xl">
+                      {markdownTab.title}
+                    </h1>
+                    <div className="text-base leading-relaxed text-slate-700 dark:text-k3-on-surface-variant [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:font-mono [&_code]:text-sm dark:[&_code]:bg-k3-surface-container-highest dark:[&_code]:text-k3-primary [&_p]:mb-2 [&_ul]:mb-2 [&_li]:mb-0.5 [&_h2]:mt-4 [&_h2]:font-display [&_h2]:text-lg [&_h2]:font-semibold">
+                      <ReactMarkdown>{markdownTab.content}</ReactMarkdown>
+                    </div>
+                  </div>
+                ) : (
+                  <>
                 {state?.done && !state.error && (
                   <div className="text-base font-medium text-emerald-700 dark:text-k3-secondary">
                     You finished every question. Well done.
@@ -559,6 +598,8 @@ export default function App() {
                         )}
                       </div>
                     )}
+                  </>
+                )}
                   </>
                 )}
               </div>
