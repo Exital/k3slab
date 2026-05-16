@@ -1,0 +1,30 @@
+# Frontend — installed packages and Vite output (recreated with npm install / npm run build)
+app/frontend/node_modules/
+app/frontend/dist/
+
+# Go build artifacts (binary name may vary)
+/k3slab
+app/backend/k3slab
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+coverage.out
+vendor/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo

@@ -9,6 +9,20 @@ body,
   margin: 0;
 }
 
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+}
+
+.material-symbols-outlined.filled {
+  font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
+}
+
+@layer utilities {
+  .k3-terminal-glow {
+    box-shadow: 0 0 20px rgba(50, 108, 229, 0.1);
+  }
+}
+
 @keyframes k3fade-in {
   from {
     opacity: 0;
