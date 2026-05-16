@@ -89,6 +89,7 @@ The UI shows the backend **`label`**; the click opens **`url`** (also shown on h
 
 - **`K3SLAB_PUBLIC_ORIGIN`** (optional): scheme + host for **NodePort** links. Default `http://localhost`. Use `http://127.0.0.1` if `localhost` resolves to IPv6 (`::1`) but Docker published IPv4 only.
 - **`K3SLAB_INGRESS_HTTP_PORT`** / **`K3SLAB_INGRESS_HTTPS_PORT`** (optional): defaults **80** / **443** for Ingress URLs if you customized Traefik.
+- **`k9s_enable`** (optional): default **`false`**. Set to **`true`** (or `1` / `yes`) to put the pre-installed **k9s** binary on `PATH`. The image bundles k9s at `/usr/local/lib/k3slab/k9s`; the entrypoint symlinks it to `/usr/local/bin/k9s` only when enabled.
 - **`K3SLAB_DEBUG`** (optional): set to **`true`** (or `1` / `yes`) to log exposure watcher sync/resync messages (`exposure: synced …`, `exposure: periodic resync …`). Off by default so routine logs stay quiet.
 
 #### Troubleshooting tabs
@@ -100,7 +101,17 @@ The UI shows the backend **`label`**; the click opens **`url`** (also shown on h
 
 #### Runtime tools in the image
 
-The container includes **kubectl**, **helm**, **jq**, **git**, **vim**, and a bash shell (see [docker/Dockerfile](docker/Dockerfile)).
+The container includes **kubectl**, **helm**, **jq**, **git**, **vim**, and a bash shell (see [docker/Dockerfile](docker/Dockerfile)). **k9s** is bundled but off by default; enable at run time with `-e k9s_enable=true`:
+
+```bash
+docker run --rm --name k3slab \
+  --privileged --cgroupns=host \
+  -p 3010:3010 \
+  -e k9s_enable=true \
+  k3slab:latest
+```
+
+Pin the bundled k9s version at build time: `docker build --build-arg K9S_VERSION=v0.50.18 -f docker/Dockerfile -t k3slab:latest .` (default `v0.50.18`). Supported platforms: **linux/amd64** and **linux/arm64** (same as the K3s binary).
 
 ### Custom lab mount
 

@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
     procps \
     kmod \
+    tar \
     vim \
     && rm -rf /var/lib/apt/lists/*
 
@@ -50,6 +51,21 @@ RUN set -eux; \
 
 RUN curl -sfL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
+ARG K9S_VERSION=v0.50.18
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    case "$arch" in \
+      x86_64) k9s_arch=Linux_amd64 ;; \
+      aarch64|arm64) k9s_arch=Linux_arm64 ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p /usr/local/lib/k3slab; \
+    curl -fsSL -o /tmp/k9s.tar.gz \
+      "https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_${k9s_arch}.tar.gz"; \
+    tar -xzf /tmp/k9s.tar.gz -C /usr/local/lib/k3slab k9s; \
+    chmod +x /usr/local/lib/k3slab/k9s; \
+    rm -f /tmp/k9s.tar.gz
+
 WORKDIR /
 
 COPY docker/entrypoint.sh /entrypoint.sh
@@ -63,6 +79,7 @@ ENV KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 ENV LAB_ROOT=/lab/k3s
 ENV K3SLAB_LISTEN=0.0.0.0:3010
 ENV K3SLAB_STATIC_DIR=/app/frontend/dist
+ENV k9s_enable=false
 
 EXPOSE 3010
 

@@ -3,6 +3,20 @@ set -euo pipefail
 
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/sbin:/bin:${PATH}"
+
+K9S_STAGED=/usr/local/lib/k3slab/k9s
+: "${k9s_enable:=false}"
+case "${k9s_enable,,}" in
+  true|1|yes)
+    echo "[k3slab] k9s_enable=true — enabling k9s"
+    ln -sf "${K9S_STAGED}" /usr/local/bin/k9s
+    export COLORTERM="${COLORTERM:-truecolor}"
+    ;;
+  *)
+    rm -f /usr/local/bin/k9s 2>/dev/null || true
+    ;;
+esac
+
 export K3SLAB_K3S_LOG_FILE="${K3SLAB_K3S_LOG_FILE:-/var/log/k3s-server.log}"
 export K3SLAB_K3S_LOG_MAX_BYTES="${K3SLAB_K3S_LOG_MAX_BYTES:-10485760}" # 10 MiB
 export K3SLAB_K3S_LOG_BACKUPS="${K3SLAB_K3S_LOG_BACKUPS:-3}"
