@@ -11,6 +11,8 @@ import (
 
 	"github.com/creack/pty"
 	"github.com/gorilla/websocket"
+
+	"k3slab/kube"
 )
 
 // terminalStartDir is the shell's initial working directory (not LAB_ROOT).
@@ -36,16 +38,8 @@ type resizeMsg struct {
 	Rows uint16 `json:"rows"`
 }
 
-func kubeEnv() []string {
-	kc := strings.TrimSpace(os.Getenv("KUBECONFIG"))
-	if kc == "" {
-		kc = "/etc/rancher/k3s/k3s.yaml"
-	}
-	return append(os.Environ(),
-		"KUBECONFIG="+kc,
-		"TERM=xterm-256color",
-		"HOME=/root",
-	)
+func terminalEnv() []string {
+	return kube.Env("TERM=xterm-256color")
 }
 
 func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +53,7 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	cmd := exec.Command("bash")
 	// Do not start in the lab tree so a casual `ls` does not expose workshop scripts.
 	cmd.Dir = terminalStartDir()
-	cmd.Env = kubeEnv()
+	cmd.Env = terminalEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,
 	}

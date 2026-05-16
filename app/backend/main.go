@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"io/fs"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 
 	"k3slab/engine"
+	"k3slab/exposure"
 	"k3slab/loghub"
 	"k3slab/server"
 	"k3slab/workshop"
@@ -42,7 +44,8 @@ func main() {
 			eng = engine.New(w, lab, hub)
 		}
 	}
-	srv, err := server.New(eng, hub, lab)
+	watcher := exposure.NewWatcher(context.Background())
+	srv, err := server.New(eng, hub, lab, watcher)
 	if err != nil {
 		log.Fatal(err)
 	}

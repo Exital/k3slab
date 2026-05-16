@@ -13,6 +13,7 @@ import {
   type WorkshopState,
 } from "./api";
 import { playVerifyTone } from "./playTone";
+import { useExposedEndpoints } from "./hooks/useExposedEndpoints";
 
 const THEME_KEY = "k3slab-theme";
 export type ThemeMode = "light" | "dark";
@@ -140,6 +141,7 @@ export default function App() {
   const [verifyOutcome, setVerifyOutcome] = useState<VerifyOutcome>("idle");
   const [hintCount, setHintCount] = useState(0);
   const [sidebarView, setSidebarView] = useState<"workshop" | string>("workshop");
+  const exposedEndpoints = useExposedEndpoints();
 
   useEffect(() => {
     try {
@@ -612,8 +614,8 @@ export default function App() {
 
           <Panel defaultSize={66} minSize={38} className="min-h-0 min-w-0">
             <section className="flex h-full min-h-0 flex-col overflow-hidden border-slate-400/15 bg-[#e4e7ee] dark:border-k3-outline-variant dark:bg-k3-surface-lowest k3-terminal-glow">
-              <div className="flex h-12 shrink-0 items-center border-b border-slate-400/20 bg-[#d8dce5] px-3 dark:border-k3-outline-variant dark:bg-k3-surface-container-high">
-                <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-12 shrink-0 items-center gap-2 overflow-hidden border-b border-slate-400/20 bg-[#d8dce5] px-3 dark:border-k3-outline-variant dark:bg-k3-surface-container-high">
+                <div className="flex shrink-0 items-center gap-3">
                   <div className="flex gap-1">
                     <div className="h-3 w-3 rounded-full bg-red-500/50" />
                     <div className="h-3 w-3 rounded-full bg-amber-400/50" />
@@ -624,6 +626,23 @@ export default function App() {
                     <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-k3-secondary" />
                     connected: lab shell
                   </span>
+                </div>
+                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+                  <span className="shrink-0 rounded-md border border-slate-400/30 bg-slate-200/80 px-2 py-1 font-mono text-xs font-medium text-slate-800 dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface">
+                    Terminal
+                  </span>
+                  {exposedEndpoints.map((ep) => (
+                    <button
+                      key={ep.id}
+                      type="button"
+                      title={ep.url}
+                      className="flex shrink-0 items-center gap-1 rounded-md border border-slate-400/25 bg-white/60 px-2 py-1 font-mono text-xs text-slate-700 transition hover:border-k3-secondary/50 hover:bg-white dark:border-k3-outline-variant dark:bg-k3-surface-low dark:text-k3-on-surface-variant dark:hover:border-k3-secondary/40 dark:hover:bg-k3-surface-container"
+                      onClick={() => window.open(ep.url, "_blank", "noopener,noreferrer")}
+                    >
+                      <MIcon name="open_in_new" className="!text-sm" />
+                      <span className="max-w-[10rem] truncate">{ep.label}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
               <div className="min-h-0 flex-1 overflow-hidden p-2 sm:p-3">

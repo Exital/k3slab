@@ -81,3 +81,27 @@ export function terminalWsUrl(): string {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${location.host}/api/ws/terminal`;
 }
+
+export type ExposedEndpoint = {
+  id: string;
+  kind: "nodeport" | "ingress";
+  namespace: string;
+  name: string;
+  label: string;
+  url: string;
+  port?: number;
+};
+
+export type ExposedSnapshot = {
+  endpoints: ExposedEndpoint[];
+};
+
+export async function getExposed(): Promise<ExposedSnapshot> {
+  const res = await fetch("/api/exposed");
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export function exposedStreamUrl(): string {
+  return "/api/stream/exposed";
+}

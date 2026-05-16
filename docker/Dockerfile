@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
     procps \
     kmod \
+    vim \
     && rm -rf /var/lib/apt/lists/*
 
 # K3s binary (install script expects systemd; use release asset instead)

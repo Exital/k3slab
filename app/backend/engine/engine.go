@@ -6,12 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
+	"k3slab/kube"
 	"k3slab/loghub"
 	"k3slab/workshop"
 )
@@ -59,14 +59,7 @@ func NewLoadError(err error, labRoot string, hub *loghub.Hub) *Engine {
 }
 
 func (e *Engine) kubeEnv() []string {
-	kc := strings.TrimSpace(os.Getenv("KUBECONFIG"))
-	if kc == "" {
-		kc = "/etc/rancher/k3s/k3s.yaml"
-	}
-	return append(os.Environ(),
-		"KUBECONFIG="+kc,
-		"HOME=/root",
-	)
+	return kube.Env()
 }
 
 // Snapshot is API-safe workshop state.

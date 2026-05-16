@@ -14,30 +14,33 @@ import (
 	"time"
 
 	"k3slab/engine"
+	"k3slab/exposure"
 	"k3slab/loghub"
 )
 
 // Server wires HTTP handlers, static SPA, SSE, and terminal WS.
 type Server struct {
-	mux     *http.ServeMux
-	eng     *engine.Engine
-	hub     *loghub.Hub
-	labRoot string
-	static  fs.FS
+	mux      *http.ServeMux
+	eng      *engine.Engine
+	hub      *loghub.Hub
+	exposure *exposure.Watcher
+	labRoot  string
+	static   fs.FS
 }
 
 // New constructs the HTTP server with routes registered.
-func New(eng *engine.Engine, hub *loghub.Hub, labRoot string) (*Server, error) {
+func New(eng *engine.Engine, hub *loghub.Hub, labRoot string, watcher *exposure.Watcher) (*Server, error) {
 	staticFS, err := staticFileSystem()
 	if err != nil {
 		log.Printf("static files: %v", err)
 	}
 	s := &Server{
-		mux:     http.NewServeMux(),
-		eng:     eng,
-		hub:     hub,
-		labRoot: labRoot,
-		static:  staticFS,
+		mux:      http.NewServeMux(),
+		eng:      eng,
+		hub:      hub,
+		exposure: watcher,
+		labRoot:  labRoot,
+		static:   staticFS,
 	}
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/workshop", s.handleWorkshop)
@@ -46,6 +49,8 @@ func New(eng *engine.Engine, hub *loghub.Hub, labRoot string) (*Server, error) {
 	s.mux.HandleFunc("POST /api/question/setup", s.handleQuestionSetup)
 	s.mux.HandleFunc("POST /api/question/submit", s.handleQuestionSubmit)
 	s.mux.HandleFunc("GET /api/stream/logs", s.handleLogStream)
+	s.mux.HandleFunc("GET /api/exposed", s.handleExposed)
+	s.mux.HandleFunc("GET /api/stream/exposed", s.handleExposedStream)
 	s.mux.HandleFunc("GET /api/ws/terminal", s.handleTerminalWS)
 
 	if s.static != nil {
@@ -182,6 +187,51 @@ func (s *Server) handleQuestionSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": ok, "logs": logs, "state": s.eng.Snapshot()})
+}
+
+func (s *Server) handleExposed(w http.ResponseWriter, r *http.Request) {
+	snap := s.exposure.Snapshot()
+	if snap.Endpoints == nil {
+		snap.Endpoints = []exposure.Endpoint{}
+	}
+	writeJSON(w, snap)
+}
+
+func (s *Server) handleExposedStream(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "stream unsupported", http.StatusInternalServerError)
+		return
+	}
+	snap := s.exposure.Snapshot()
+	if snap.Endpoints == nil {
+		snap.Endpoints = []exposure.Endpoint{}
+	}
+	writeExposedSSE(w, flusher, snap)
+	ch := s.exposure.Hub().Subscribe()
+	defer s.exposure.Hub().Unsubscribe(ch)
+	for {
+		select {
+		case snap, open := <-ch:
+			if !open {
+				return
+			}
+			writeExposedSSE(w, flusher, snap)
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+func writeExposedSSE(w http.ResponseWriter, flusher http.Flusher, snap exposure.Snapshot) {
+	b, _ := json.Marshal(snap)
+	_, _ = w.Write([]byte("data: "))
+	_, _ = w.Write(b)
+	_, _ = w.Write([]byte("\n\n"))
+	flusher.Flush()
 }
 
 func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {

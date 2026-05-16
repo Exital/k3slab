@@ -30,6 +30,78 @@ The entrypoint starts K3s with **`--snapshotter=native`** by default so containe
 
 Open **`http://127.0.0.1:3010`** (recommended on Docker Desktop). If that works but `http://localhost:3010` does not, your machine is preferring IPv6 for `localhost`; see troubleshooting below.
 
+### Opening apps (NodePort / Ingress)
+
+When you expose workloads with **NodePort** Services or **Ingress** resources, the **terminal title bar** shows **Open in browser** tabs. They appear and disappear automatically as you create or delete Services and Ingresses (the API watches the cluster and pushes updates over SSE).
+
+Links open on your **host** browser. There is no reverse proxy on port 3010 — you must publish the same ports on `docker run -p` that the workload uses inside the container.
+
+| Exposure | Container port | Typical `docker run` |
+|----------|----------------|----------------------|
+| Workshop UI | 3010 | `-p 3010:3010` |
+| Ingress (K3s Traefik, HTTP) | **80** | `-p 80:80` |
+| Ingress (HTTPS / TLS) | **443** | `-p 443:443` |
+| NodePort | **30000–32767** (per Service) | `-p <nodePort>:<nodePort>` (match `kubectl get svc`) |
+
+**Build and run** (rebuild the image after pulling code changes):
+
+```bash
+docker build -f docker/Dockerfile -t k3slab:test .
+
+docker run --rm --name k3slab \
+  --privileged \
+  --cgroupns=host \
+  -p 3010:3010 \
+  -p 80:80 \
+  -p 443:443 \
+  -p 30010:30010 \
+  -e K3SLAB_PUBLIC_ORIGIN=http://127.0.0.1 \
+  k3slab:test
+```
+
+**Sample manifests** (from the web terminal, paths are under `/lab/k3s`):
+
+| File | What it does | Tab label (example) | Open in browser |
+|------|----------------|---------------------|-----------------|
+| [lab/k3s/manifests/demo-ingress.yml](lab/k3s/manifests/demo-ingress.yml) | nginx + Ingress on `localhost` / `/my_app` | `localhost/my_app` | `http://localhost/my_app/` |
+| [lab/k3s/manifests/demo-nodeport.yml](lab/k3s/manifests/demo-nodeport.yml) | nginx + NodePort **30010** | `web:30010` | `http://127.0.0.1:30010/` (with origin above) |
+
+```bash
+kubectl apply -f manifests/demo-ingress.yml
+kubectl apply -f manifests/demo-nodeport.yml
+```
+
+Ingress rules must use a **DNS hostname** (e.g. `localhost`), not an IP — Kubernetes rejects IP addresses in `spec.rules[].host`.
+
+#### Tab labels and URLs
+
+The UI shows the backend **`label`**; the click opens **`url`** (also shown on hover).
+
+| Kind | Tab label | URL |
+|------|-----------|-----|
+| **NodePort** | `{serviceName}:{nodePort}` | `{K3SLAB_PUBLIC_ORIGIN host}:{nodePort}/` |
+| **Ingress (HTTP)** | `{host}` or `{host}{path}` if path is not `/` | `http://{host}{path}` (port 80 omitted) |
+| **Ingress (HTTPS)** | same as HTTP + ` (https)` | `https://{host}{path}` when TLS covers that host |
+
+`K3SLAB_PUBLIC_ORIGIN` affects **NodePort URLs only**. Ingress tabs always use the **hostname from the Ingress rule** (not the public-origin host).
+
+#### Environment variables
+
+- **`K3SLAB_PUBLIC_ORIGIN`** (optional): scheme + host for **NodePort** links. Default `http://localhost`. Use `http://127.0.0.1` if `localhost` resolves to IPv6 (`::1`) but Docker published IPv4 only.
+- **`K3SLAB_INGRESS_HTTP_PORT`** / **`K3SLAB_INGRESS_HTTPS_PORT`** (optional): defaults **80** / **443** for Ingress URLs if you customized Traefik.
+- **`K3SLAB_DEBUG`** (optional): set to **`true`** (or `1` / `yes`) to log exposure watcher sync/resync messages (`exposure: synced …`, `exposure: periodic resync …`). Off by default so routine logs stay quiet.
+
+#### Troubleshooting tabs
+
+1. **Rebuild the image** after updating k3slab — `docker build` then `docker run` (Docker does not pull `k3slab:test` from a registry; a missing local image fails with “pull access denied”).
+2. **Publish ports** — e.g. `-p 80:80` for Ingress, `-p 30010:30010` for the demo NodePort.
+3. **Check the API** — `curl -s http://127.0.0.1:3010/api/exposed` should list `endpoints` (not `null`) after you apply a NodePort Service or Ingress.
+4. **Ingress host** — open the URL with the rule’s host (e.g. `http://localhost/my_app/`, not `http://127.0.0.1/my_app/` unless the rule uses that host).
+
+#### Runtime tools in the image
+
+The container includes **kubectl**, **helm**, **jq**, **git**, **vim**, and a bash shell (see [docker/Dockerfile](docker/Dockerfile)).
+
 ### Custom lab mount
 
 Mount your own workshop at `/lab/k3s` (must include `workshop.yml`):
@@ -61,7 +133,8 @@ docker run --rm --name k3slab \
 |------|------|
 | [docker/Dockerfile](docker/Dockerfile) | Multi-stage image: Node build → Go build → Ubuntu runtime + K3s |
 | [docker/entrypoint.sh](docker/entrypoint.sh) | Start K3s, wait for Ready, start `k3slab` API + static UI |
-| [app/backend](app/backend) | Go API: workshop engine, SSE logs, PTY WebSocket terminal |
+| [app/backend](app/backend) | Go API: workshop engine, exposure watcher, SSE logs, PTY WebSocket terminal |
+| [lab/k3s/manifests](lab/k3s/manifests) | Sample manifests (workshop + demo Ingress / NodePort) |
 | [app/frontend](app/frontend) | Vite + React + Tailwind + xterm.js |
 | [lab/k3s](lab/k3s) | Default baked-in workshop (`workshop.yml`, scripts, manifests) |
 
@@ -243,4 +316,6 @@ A full working file ships as [lab/k3s/workshop.yml](lab/k3s/workshop.yml). Mount
 - `POST /api/question/setup` — run **setup** for the current question  
 - `POST /api/question/submit` — JSON `{ "answer": "..." }` runs **verify** (`ANSWER` env)  
 - `GET /api/stream/logs` — SSE log stream for setup/task output  
+- `GET /api/exposed` — JSON `{ "endpoints": [...] }` for NodePort / Ingress browser links  
+- `GET /api/stream/exposed` — SSE stream of the same payload when Services or Ingresses change  
 - `GET /api/ws/terminal` — WebSocket PTY (binary I/O + JSON `{"type":"resize","cols","rows"}` text frames)
