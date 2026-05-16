@@ -323,23 +323,23 @@ export default function App() {
   const shell = theme === "dark" ? "dark" : "";
 
   const navInactive =
-    "rounded-lg px-3 py-2 text-slate-600 transition-colors hover:bg-slate-200/80 dark:text-k3-on-surface-variant dark:hover:bg-k3-surface-variant";
+    "rounded-lg px-3 py-2 text-slate-600 transition-colors hover:bg-slate-300/50 dark:text-k3-on-surface-variant dark:hover:bg-k3-surface-variant";
 
   const navActive =
-    "flex w-full items-center gap-3 rounded-lg bg-k3-secondary-container px-3 py-2 text-left text-k3-on-secondary-container dark:bg-k3-secondary-container dark:text-k3-on-secondary-container";
+    "flex w-full items-center gap-3 rounded-lg border border-teal-400/50 bg-teal-100/90 px-3 py-2 text-left font-medium text-teal-950 shadow-sm dark:border-transparent dark:bg-k3-secondary-container dark:font-normal dark:text-k3-on-secondary-container dark:shadow-none";
 
   return (
     <div
-      className={`${shell} flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 dark:bg-k3-background dark:text-k3-on-background`}
+      className={`${shell} flex h-full min-h-0 flex-col bg-[#dfe3ea] text-slate-800 dark:bg-k3-background dark:text-k3-on-background`}
     >
       {/* Top app bar — Stitch / DESIGN.md */}
-      <header className="z-50 flex h-16 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-5 dark:border-k3-outline-variant dark:bg-k3-surface">
+      <header className="z-50 flex h-16 shrink-0 items-center justify-between border-b border-slate-400/25 bg-[#eceef3]/95 px-5 backdrop-blur-sm dark:border-k3-outline-variant dark:bg-k3-surface dark:backdrop-blur-none">
         <div className="flex min-w-0 items-center gap-6">
-          <span className="truncate font-display text-xl font-extrabold tracking-tight text-k3-primary dark:text-k3-primary">
+          <span className="truncate font-display text-xl font-extrabold tracking-tight text-slate-900 dark:text-k3-primary">
             {state?.name ?? "K3sLab"}
           </span>
           <nav className="hidden items-center md:flex">
-            <span className="border-b-2 border-k3-primary pb-1 font-mono text-xs font-medium uppercase tracking-wider text-k3-primary dark:text-k3-primary">
+            <span className="border-b-2 border-blue-700 pb-1 font-mono text-xs font-semibold uppercase tracking-wider text-blue-900 dark:border-k3-primary dark:font-medium dark:text-k3-primary">
               Labs
             </span>
           </nav>
@@ -347,7 +347,7 @@ export default function App() {
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <button
             type="button"
-            className="rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-k3-primary-container dark:text-k3-on-surface-variant dark:hover:bg-k3-surface-variant dark:hover:text-k3-primary"
+            className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-300/40 hover:text-slate-900 dark:text-k3-on-surface-variant dark:hover:bg-k3-surface-variant dark:hover:text-k3-primary"
             title={theme === "dark" ? "Light mode" : "Dark mode"}
             onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
           >
@@ -360,7 +360,7 @@ export default function App() {
           >
             Restart
           </button>
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200 bg-slate-200 text-xs font-bold text-slate-700 dark:border-k3-outline-variant dark:bg-k3-surface-container-highest dark:text-k3-on-background">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-400/40 bg-slate-300/50 text-xs font-bold text-slate-800 dark:border-k3-outline-variant dark:bg-k3-surface-container-highest dark:text-k3-on-background">
             {(state?.name ?? "K").slice(0, 1).toUpperCase()}
           </div>
         </div>
@@ -368,21 +368,21 @@ export default function App() {
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Side nav — contextual lab (Stitch) */}
-        <aside className="hidden min-h-0 w-[280px] shrink-0 flex-col border-r border-slate-200 bg-slate-100 py-4 pl-2 pr-2 dark:border-k3-outline-variant dark:bg-k3-surface-low md:flex">
+        <aside className="hidden min-h-0 w-[280px] shrink-0 flex-col border-r border-slate-400/20 bg-[#d4d9e3]/90 py-4 pl-2 pr-2 dark:border-k3-outline-variant dark:bg-k3-surface-low md:flex">
           <div className="mb-6 px-3">
             <div className="mb-1 flex items-center gap-2">
-              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-300 dark:bg-k3-surface-variant">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-400/35 dark:bg-k3-surface-variant">
                 <div
-                  className="h-full rounded-full bg-k3-secondary transition-[width] duration-300"
+                  className="h-full rounded-full bg-teal-600 dark:bg-k3-secondary transition-[width] duration-300"
                   style={{ width: `${progressMeta.pct}%` }}
                 />
               </div>
             </div>
-            <h2 className="font-display text-2xl font-bold tracking-tight text-k3-primary dark:text-k3-primary">
+            <h2 className="font-display text-2xl font-bold tracking-tight text-blue-950 dark:text-k3-primary">
               {progressMeta.line1}
             </h2>
             {progressMeta.line2 && (
-              <p className="mt-0.5 text-sm text-slate-600 dark:text-k3-on-surface-variant">{progressMeta.line2}</p>
+              <p className="mt-0.5 text-sm font-medium text-slate-700 dark:text-k3-on-surface-variant">{progressMeta.line2}</p>
             )}
           </div>
           <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
@@ -406,7 +406,7 @@ export default function App() {
               </button>
             ))}
           </nav>
-          <div className="mt-auto flex shrink-0 flex-col gap-1 border-t border-slate-200 pt-4 dark:border-k3-outline-variant">
+          <div className="mt-auto flex shrink-0 flex-col gap-1 border-t border-slate-400/25 pt-4 dark:border-k3-outline-variant">
             <button
               type="button"
               className={`flex w-full items-center gap-3 ${navInactive}`}
@@ -429,9 +429,9 @@ export default function App() {
         {/* Instruction + terminal */}
         <PanelGroup direction="horizontal" className="min-h-0 min-w-0 flex-1">
           <Panel defaultSize={34} minSize={22} className="min-h-0 min-w-[240px]">
-            <section className="relative flex h-full min-h-0 flex-col overflow-hidden border-r border-slate-200 bg-white dark:border-k3-outline-variant dark:bg-k3-surface">
+            <section className="relative flex h-full min-h-0 flex-col overflow-hidden border-r border-slate-400/20 bg-[#eef1f6] dark:border-k3-outline-variant dark:bg-k3-surface">
               {sidebarView === "workshop" && overlayLabel && (
-                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-white/90 backdrop-blur-md dark:bg-k3-surface-lowest/90">
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#eef1f6]/95 backdrop-blur-md dark:bg-k3-surface-lowest/90">
                   <span className="h-10 w-10 animate-spin rounded-full border-2 border-slate-200 border-t-k3-primary-container dark:border-k3-outline-variant dark:border-t-k3-secondary" />
                   <p className="text-sm font-medium text-slate-700 dark:text-k3-on-surface">{overlayLabel}</p>
                 </div>
@@ -495,7 +495,7 @@ export default function App() {
                   <>
                     <div className="space-y-3">
                       {typeBadge && (
-                        <span className="font-mono text-xs font-medium uppercase tracking-widest text-k3-secondary">
+                        <span className="font-mono text-xs font-medium uppercase tracking-widest text-teal-800 dark:text-k3-secondary">
                           {typeBadge}
                         </span>
                       )}
@@ -525,12 +525,12 @@ export default function App() {
                     {current.type === "question" && current.setupDone && (
                       <div className="space-y-4">
                         {current.answer_type === "text" && (
-                          <div className="rounded-xl border-2 border-k3-secondary bg-k3-surface-container p-4 dark:border-k3-secondary dark:bg-k3-surface-container">
-                            <label className="mb-2 block font-sans text-sm font-semibold tracking-normal text-k3-secondary subpixel-antialiased dark:text-k3-secondary">
+                          <div className="rounded-xl border-2 border-teal-500/45 bg-white p-4 shadow-sm dark:border-k3-secondary dark:bg-k3-surface-container dark:shadow-none">
+                            <label className="mb-2 block font-sans text-sm font-semibold tracking-normal text-teal-900 subpixel-antialiased dark:text-k3-secondary">
                               Your answer
                             </label>
                             <input
-                              className="w-full rounded-lg border-2 border-k3-secondary bg-k3-surface-lowest px-3 py-2.5 font-mono text-sm text-k3-secondary outline-none ring-0 placeholder:text-k3-on-surface-variant focus:border-k3-primary-container dark:bg-k3-surface-lowest dark:text-k3-secondary"
+                              className="w-full rounded-lg border-2 border-slate-300 bg-white px-3 py-2.5 font-mono text-sm text-slate-900 outline-none ring-0 placeholder:text-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 dark:border-k3-secondary dark:bg-k3-surface-lowest dark:text-k3-secondary dark:placeholder:text-k3-on-surface-variant dark:focus:border-k3-primary-container dark:focus:ring-cyan-500/20"
                               value={answer}
                               onChange={(e) => setAnswer(e.target.value)}
                               disabled={busy}
@@ -541,7 +541,7 @@ export default function App() {
 
                         {current.answer_type === "single_choice" && (
                           <div className="space-y-3">
-                            <div className="font-mono text-xs font-medium uppercase tracking-wider text-k3-on-surface-variant">
+                            <div className="font-mono text-xs font-medium uppercase tracking-wider text-slate-600 dark:text-k3-on-surface-variant">
                               Choose one
                             </div>
                             {(current.options ?? []).map((opt) => (
@@ -575,7 +575,7 @@ export default function App() {
                           {hasMoreHints && (
                             <button
                               type="button"
-                              className="w-full rounded-lg border border-slate-300 bg-white py-2.5 font-sans text-sm font-medium tracking-normal text-slate-800 subpixel-antialiased hover:bg-slate-50 dark:border-k3-outline-variant dark:bg-k3-surface-container-high dark:text-k3-on-surface dark:hover:bg-k3-surface-variant"
+                              className="w-full rounded-lg border border-slate-400/35 bg-[#f4f6fa] py-2.5 font-sans text-sm font-medium tracking-normal text-slate-800 subpixel-antialiased hover:bg-slate-200/60 dark:border-k3-outline-variant dark:bg-k3-surface-container-high dark:text-k3-on-surface dark:hover:bg-k3-surface-variant"
                               onClick={() => setHintCount((c) => c + 1)}
                               disabled={busy}
                             >
@@ -606,13 +606,13 @@ export default function App() {
             </section>
           </Panel>
 
-          <PanelResizeHandle className="group relative w-2 shrink-0 cursor-col-resize bg-slate-200 dark:bg-k3-surface-low">
-            <span className="absolute inset-y-8 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-slate-400 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-k3-outline" />
+          <PanelResizeHandle className="group relative w-2 shrink-0 cursor-col-resize bg-slate-300/50 dark:bg-k3-surface-low">
+            <span className="absolute inset-y-8 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-slate-500/50 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-k3-outline" />
           </PanelResizeHandle>
 
           <Panel defaultSize={66} minSize={38} className="min-h-0 min-w-0">
-            <section className="flex h-full min-h-0 flex-col overflow-hidden border-slate-200 bg-slate-100 dark:border-k3-outline-variant dark:bg-k3-surface-lowest k3-terminal-glow">
-              <div className="flex h-12 shrink-0 items-center border-b border-slate-200 bg-slate-200/80 px-3 dark:border-k3-outline-variant dark:bg-k3-surface-container-high">
+            <section className="flex h-full min-h-0 flex-col overflow-hidden border-slate-400/15 bg-[#e4e7ee] dark:border-k3-outline-variant dark:bg-k3-surface-lowest k3-terminal-glow">
+              <div className="flex h-12 shrink-0 items-center border-b border-slate-400/20 bg-[#d8dce5] px-3 dark:border-k3-outline-variant dark:bg-k3-surface-container-high">
                 <div className="flex min-w-0 items-center gap-3">
                   <div className="flex gap-1">
                     <div className="h-3 w-3 rounded-full bg-red-500/50" />
@@ -629,7 +629,7 @@ export default function App() {
               <div className="min-h-0 flex-1 overflow-hidden p-2 sm:p-3">
                 <TerminalPane theme={theme} />
               </div>
-              <div className="flex h-8 shrink-0 items-center justify-between border-t border-slate-200 bg-slate-100 px-3 font-mono text-xs text-slate-500 dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface-variant">
+              <div className="flex h-8 shrink-0 items-center justify-between border-t border-slate-400/20 bg-[#dce0e8] px-3 font-mono text-xs text-slate-600 dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface-variant">
                 <div className="flex items-center gap-3">
                   <span className="text-k3-secondary">UTF-8</span>
                   <span>Terminal</span>
