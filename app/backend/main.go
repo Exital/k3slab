@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"k3slab/cluster"
 	"k3slab/engine"
 	"k3slab/exposure"
 	"k3slab/loghub"
@@ -45,7 +46,8 @@ func main() {
 		}
 	}
 	watcher := exposure.NewWatcher(context.Background())
-	srv, err := server.New(eng, hub, lab, watcher)
+	clusterMgr := cluster.NewManager()
+	srv, err := server.New(eng, hub, lab, watcher, clusterMgr)
 	if err != nil {
 		log.Fatal(err)
 	}

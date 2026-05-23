@@ -233,6 +233,22 @@ func (w *Watcher) rebuild() {
 	w.hub.Broadcast(snap)
 }
 
+// Clear drops cached Services/Ingresses and broadcasts an empty endpoint list.
+func (w *Watcher) Clear() {
+	w.mu.Lock()
+	clear(w.svc)
+	clear(w.ing)
+	snap := Snapshot{Endpoints: []Endpoint{}}
+	w.snap = snap
+	w.mu.Unlock()
+	w.hub.Broadcast(snap)
+}
+
+// Sync refreshes the endpoint list from the current cluster state.
+func (w *Watcher) Sync() {
+	w.syncList()
+}
+
 func (w *Watcher) sleepRetry() {
 	select {
 	case <-w.ctx.Done():

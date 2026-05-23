@@ -21,6 +21,9 @@ export K3SLAB_K3S_LOG_FILE="${K3SLAB_K3S_LOG_FILE:-/var/log/k3s-server.log}"
 export K3SLAB_K3S_LOG_MAX_BYTES="${K3SLAB_K3S_LOG_MAX_BYTES:-10485760}" # 10 MiB
 export K3SLAB_K3S_LOG_BACKUPS="${K3SLAB_K3S_LOG_BACKUPS:-3}"
 
+# shellcheck source=/dev/null
+source /usr/local/lib/k3slab/k3s-lifecycle.sh
+
 rotate_k3s_log_if_needed() {
   [[ -f "${K3SLAB_K3S_LOG_FILE}" ]] || return 0
   local size
@@ -56,18 +59,7 @@ echo "[k3slab] Starting K3s server..."
 # Inside Docker, nested overlay often fails ("overlayfs snapshotter cannot be enabled...
 # try fuse-overlayfs or native"). Native snapshotter is slower but reliable for local labs.
 : "${K3SLAB_K3S_SNAPSHOTTER:=native}"
-mkdir -p "$(dirname "${K3SLAB_K3S_LOG_FILE}")"
-: > "${K3SLAB_K3S_LOG_FILE}"
-k3s server \
-  --write-kubeconfig-mode 644 \
-  --bind-address 0.0.0.0 \
-  --https-listen-port 6443 \
-  --disable-network-policy \
-  --disable=metrics-server \
-  --snapshotter="${K3SLAB_K3S_SNAPSHOTTER}" \
-  >> "${K3SLAB_K3S_LOG_FILE}" 2>&1 &
-
-K3S_PID=$!
+K3S_PID=$(start_k3s)
 start_k3s_log_rotator
 
 cleanup() {
@@ -80,30 +72,11 @@ cleanup() {
     kill "${APP_PID}" 2>/dev/null || true
     wait "${APP_PID}" 2>/dev/null || true
   fi
-  if kill -0 "${K3S_PID}" 2>/dev/null; then
-    kill "${K3S_PID}" 2>/dev/null || true
-    wait "${K3S_PID}" 2>/dev/null || true
-  fi
+  stop_k3s
 }
 trap cleanup SIGINT SIGTERM
 
-echo "[k3slab] Waiting for cluster to become Ready..."
-start_ts=$(date +%s)
-while true; do
-  if kubectl get nodes 2>/dev/null | grep -q '\sReady\s'; then
-    break
-  fi
-  now_ts=$(date +%s)
-  if (( now_ts - start_ts > 300 )); then
-    echo "[k3slab] ERROR: K3s did not become ready in time."
-    echo "[k3slab] Last K3s log lines (${K3SLAB_K3S_LOG_FILE}):"
-    tail -n 80 "${K3SLAB_K3S_LOG_FILE}" 2>/dev/null || true
-    exit 1
-  fi
-  sleep 2
-done
-
-echo "[k3slab] Cluster is Ready."
+wait_ready
 
 export LAB_ROOT="${LAB_ROOT:-/lab/k3s}"
 export K3SLAB_LISTEN="${K3SLAB_LISTEN:-0.0.0.0:3010}"

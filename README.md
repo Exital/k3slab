@@ -4,7 +4,7 @@ Self-contained Kubernetes learning environment: **K3s**, **kubectl**, **Helm**, 
 
 ## Security
 
-This image is meant for **trusted local learning only**. It exposes a real shell and cluster admin to anyone who can reach the web port.
+This image is meant for **trusted local learning only**. It exposes a real shell and cluster admin to anyone who can reach the web port. **Restart lab** in the UI wipes all cluster state (`/var/lib/rancher/k3s`) and workshop progress — use only in local lab environments.
 
 ## Build and run (Docker only)
 
@@ -91,6 +91,7 @@ The UI shows the backend **`label`**; the click opens **`url`** (also shown on h
 - **`K3SLAB_INGRESS_HTTP_PORT`** / **`K3SLAB_INGRESS_HTTPS_PORT`** (optional): defaults **80** / **443** for Ingress URLs if you customized Traefik.
 - **`k9s_enable`** (optional): default **`false`**. Set to **`true`** (or `1` / `yes`) to put the pre-installed **k9s** binary on `PATH`. The image bundles k9s at `/usr/local/lib/k3slab/k9s`; the entrypoint symlinks it to `/usr/local/bin/k9s` only when enabled.
 - **`K3SLAB_DEBUG`** (optional): set to **`true`** (or `1` / `yes`) to log exposure watcher sync/resync messages (`exposure: synced …`, `exposure: periodic resync …`). Off by default so routine logs stay quiet.
+- **`K3SLAB_ALLOW_CLUSTER_RESET`** (optional): default **`true`**. Set to **`false`** (or `0` / `no`) to disable **Restart lab** (`POST /api/lab/restart`).
 
 #### Troubleshooting tabs
 
@@ -129,7 +130,23 @@ docker run --rm --name k3slab \
 ### Quick checks
 
 - Health: `curl -sf http://127.0.0.1:3010/health`
+- Lab status: `curl -s http://127.0.0.1:3010/api/lab/status` → `{"cluster":"ready"}`, `{"cluster":"resetting"}`, or `{"cluster":"unavailable"}`
 - If the UI never loads, confirm the container logs show `Cluster is Ready` and `listening on 0.0.0.0:3010` (or your `K3SLAB_LISTEN` value).
+
+### Restart lab
+
+The **Restart lab** button in the UI (header, `sm` screens and up) performs a full reset:
+
+1. Stops the in-container K3s server
+2. Deletes cluster data at `/var/lib/rancher/k3s`
+3. Starts K3s again and waits until the node is **Ready**
+4. Resets workshop progress to step 1 (the first task runs automatically)
+
+Typical duration is **~20–60 seconds**; the API times out after **5 minutes** if K3s does not become Ready. During reset, **kubectl** in the terminal may fail briefly and cluster-dependent API calls return **409**. If reset fails, the UI shows an error and asks you to **stop and recreate the container**; the reset script attempts to restore K3s when possible.
+
+This is distinct from **`POST /api/workshop/restart`**, which resets workshop progress **in memory only** and does not touch cluster state (internal/dev use).
+
+If reset fails, restart the container (`docker run …` again) for a clean slate.
 
 ### “Connection refused” on `http://localhost:3010`
 
@@ -144,6 +161,8 @@ docker run --rm --name k3slab \
 |------|------|
 | [docker/Dockerfile](docker/Dockerfile) | Multi-stage image: Node build → Go build → Ubuntu runtime + K3s |
 | [docker/entrypoint.sh](docker/entrypoint.sh) | Start K3s, wait for Ready, start `k3slab` API + static UI |
+| [docker/k3s-lifecycle.sh](docker/k3s-lifecycle.sh) | Shared K3s start/stop/wait/reset helpers (entrypoint + API reset) |
+| [docker/cluster-reset.sh](docker/cluster-reset.sh) | Cluster wipe script invoked by `POST /api/lab/restart` |
 | [app/backend](app/backend) | Go API: workshop engine, exposure watcher, SSE logs, PTY WebSocket terminal |
 | [lab/k3s/manifests](lab/k3s/manifests) | Sample manifests (workshop + demo Ingress / NodePort) |
 | [app/frontend](app/frontend) | Vite + React + Tailwind + xterm.js |
@@ -254,7 +273,7 @@ Rough guardrails: **task** and **question setup** up to about **10 minutes** eac
 - **Questions** run **setup** automatically once per step (when the step becomes current and setup is not yet done). The learner then answers and submits; **verify** runs on each submit until it exits 0.
 - After a **correct** answer, the UI stays on the same question and shows **Next question** (replacing **Submit answer**). Optional **`correct_message`** / **`incorrect_message`** panels are dismissible with **×** and do not auto-hide like the brief success/failure banners at the top of the panel.
 - **Wrong answer**: the incorrect panel (custom or default) stays visible across repeated wrong submits until dismissed. If the learner dismisses it and submits wrong again, the panel reappears.
-- **Restart workshop** in the UI resets progress **in memory** to the first step (no cluster state rollback—design your labs or scripts accordingly).
+- **Restart lab** in the UI resets workshop progress **and** cluster state (full K3s wipe). Use it when the learner wants a clean slate; expect ~20–60 seconds while the cluster restarts.
 - Progress is **per running app instance** (single shared learner if multiple browser tabs hit the same server).
 
 ### Minimal examples
@@ -327,7 +346,9 @@ A full working file ships as [lab/k3s/workshop.yml](lab/k3s/workshop.yml). Mount
 ## API (same origin as UI)
 
 - `GET /api/workshop` — current step and metadata (includes `sidebarTabs` from `tabs.markdowns`)  
-- `POST /api/workshop/restart` — reset workshop progress to the beginning (in-memory)  
+- `GET /api/lab/status` — `{ "cluster": "ready" | "resetting" | "unavailable" }`  
+- `POST /api/lab/restart` — reset cluster + workshop progress to step 1  
+- `POST /api/workshop/restart` — reset workshop progress only (in-memory; internal/dev; no cluster wipe)  
 - `POST /api/task/run` — run the current **task** step  
 - `POST /api/question/setup` — run **setup** for the current question  
 - `POST /api/question/submit` — JSON `{ "answer": "..." }` runs **verify** (`ANSWER` env); marks the question complete on success but does not advance  

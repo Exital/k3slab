@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"k3slab/cluster"
 	"k3slab/engine"
 	"k3slab/exposure"
 	"k3slab/loghub"
@@ -24,12 +25,13 @@ type Server struct {
 	eng      *engine.Engine
 	hub      *loghub.Hub
 	exposure *exposure.Watcher
+	cluster  *cluster.Manager
 	labRoot  string
 	static   fs.FS
 }
 
 // New constructs the HTTP server with routes registered.
-func New(eng *engine.Engine, hub *loghub.Hub, labRoot string, watcher *exposure.Watcher) (*Server, error) {
+func New(eng *engine.Engine, hub *loghub.Hub, labRoot string, watcher *exposure.Watcher, clusterMgr *cluster.Manager) (*Server, error) {
 	staticFS, err := staticFileSystem()
 	if err != nil {
 		log.Printf("static files: %v", err)
@@ -39,10 +41,13 @@ func New(eng *engine.Engine, hub *loghub.Hub, labRoot string, watcher *exposure.
 		eng:      eng,
 		hub:      hub,
 		exposure: watcher,
+		cluster:  clusterMgr,
 		labRoot:  labRoot,
 		static:   staticFS,
 	}
 	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/lab/status", s.handleLabStatus)
+	s.mux.HandleFunc("POST /api/lab/restart", s.handleLabRestart)
 	s.mux.HandleFunc("GET /api/workshop", s.handleWorkshop)
 	s.mux.HandleFunc("POST /api/workshop/restart", s.handleWorkshopRestart)
 	s.mux.HandleFunc("POST /api/task/run", s.handleTaskRun)
@@ -139,6 +144,45 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+func (s *Server) handleLabStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]string{"cluster": s.cluster.Status(r.Context())})
+}
+
+func (s *Server) handleLabRestart(w http.ResponseWriter, r *http.Request) {
+	if s.cluster.IsResetting() {
+		writeErr(w, http.StatusConflict, cluster.ErrAlreadyResetting)
+		return
+	}
+
+	s.exposure.Clear()
+	if err := s.cluster.Reset(r.Context()); err != nil {
+		switch {
+		case errors.Is(err, cluster.ErrResetDisabled):
+			writeErr(w, http.StatusForbidden, err)
+		case errors.Is(err, cluster.ErrAlreadyResetting):
+			writeErr(w, http.StatusConflict, err)
+		default:
+			writeErr(w, http.StatusInternalServerError, cluster.ErrResetFailed)
+		}
+		return
+	}
+
+	s.exposure.Sync()
+	if err := s.eng.Restart(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, map[string]any{"state": s.eng.Snapshot()})
+}
+
+func (s *Server) requireClusterReady(w http.ResponseWriter) bool {
+	if s.cluster.IsResetting() {
+		writeErr(w, http.StatusConflict, cluster.ErrAlreadyResetting)
+		return false
+	}
+	return true
+}
+
 func (s *Server) handleWorkshop(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.eng.Snapshot())
 }
@@ -152,6 +196,9 @@ func (s *Server) handleWorkshopRestart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTaskRun(w http.ResponseWriter, r *http.Request) {
+	if !s.requireClusterReady(w) {
+		return
+	}
 	ctx := r.Context()
 	logs, err := s.eng.RunTask(ctx)
 	if err != nil {
@@ -162,6 +209,9 @@ func (s *Server) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleQuestionSetup(w http.ResponseWriter, r *http.Request) {
+	if !s.requireClusterReady(w) {
+		return
+	}
 	ctx := r.Context()
 	logs, err := s.eng.RunQuestionSetup(ctx)
 	if err != nil {
@@ -181,6 +231,9 @@ func (s *Server) handleQuestionSubmit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
+	if !s.requireClusterReady(w) {
+		return
+	}
 	ctx := r.Context()
 	ok, logs, err := s.eng.SubmitAnswer(ctx, body.Answer)
 	if err != nil {
@@ -191,6 +244,9 @@ func (s *Server) handleQuestionSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleQuestionNext(w http.ResponseWriter, r *http.Request) {
+	if !s.requireClusterReady(w) {
+		return
+	}
 	if err := s.eng.AdvanceQuestion(); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return

@@ -54,6 +54,42 @@ export async function restartWorkshop(): Promise<WorkshopState> {
   return body as WorkshopState;
 }
 
+export const LAB_RESTART_FAILED_MSG =
+  "Lab restart failed and the cluster may be unavailable. Stop and recreate the container (docker run …) to recover.";
+
+export type LabStatus = {
+  cluster: "ready" | "resetting" | "unavailable";
+};
+
+export async function getLabStatus(): Promise<LabStatus> {
+  const res = await fetch("/api/lab/status");
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function waitForLabReady(timeoutMs = 120_000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const status = await getLabStatus();
+    if (status.cluster === "ready") return;
+    if (status.cluster === "unavailable") {
+      throw new Error(LAB_RESTART_FAILED_MSG);
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 2000));
+  }
+  throw new Error(LAB_RESTART_FAILED_MSG);
+}
+
+export async function restartLab(): Promise<WorkshopState> {
+  const res = await fetch("/api/lab/restart", {
+    method: "POST",
+    signal: AbortSignal.timeout(300_000),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { error?: string }).error || res.statusText);
+  return (body as { state: WorkshopState }).state;
+}
+
 export async function runTask(): Promise<{ ok: boolean; logs: string; state: WorkshopState }> {
   const res = await fetch("/api/task/run", { method: "POST" });
   const body = await res.json().catch(() => ({}));

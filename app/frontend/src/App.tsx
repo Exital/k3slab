@@ -3,11 +3,14 @@ import ReactMarkdown from "react-markdown";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import {
   advanceQuestion,
+  getLabStatus,
   getWorkshop,
-  restartWorkshop,
+  LAB_RESTART_FAILED_MSG,
+  restartLab,
   runQuestionSetup,
   runTask,
   submitAnswer,
+  waitForLabReady,
   type WorkshopState,
 } from "./api";
 import { MIcon } from "./components/MIcon";
@@ -96,6 +99,8 @@ export default function App({ theme, setTheme }: AppProps) {
   const [incorrectPanelDismissed, setIncorrectPanelDismissed] = useState(false);
   const [correctPanelDismissed, setCorrectPanelDismissed] = useState(false);
   const [hintCount, setHintCount] = useState(0);
+  const [labRestarting, setLabRestarting] = useState(false);
+  const [labRestartFailed, setLabRestartFailed] = useState<string | null>(null);
   const [sidebarView, setSidebarView] = useState<"workshop" | string>("workshop");
   const exposedEndpoints = useExposedEndpoints();
   const { detached, detach, dock, popupBlocked } = useTerminalDetach();
@@ -120,9 +125,45 @@ export default function App({ theme, setTheme }: AppProps) {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const status = await getLabStatus();
+        if (status.cluster === "resetting") {
+          setLabRestarting(true);
+        } else if (status.cluster === "unavailable") {
+          setLabRestartFailed(LAB_RESTART_FAILED_MSG);
+          setLabRestarting(true);
+        }
+      } catch {
+        // ignore status probe errors on load
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!labRestarting || labRestartFailed) return;
+    const id = window.setInterval(() => {
+      void (async () => {
+        try {
+          const status = await getLabStatus();
+          if (status.cluster === "ready") {
+            setLabRestarting(false);
+            await refresh();
+          } else if (status.cluster === "unavailable") {
+            setLabRestartFailed(LAB_RESTART_FAILED_MSG);
+          }
+        } catch {
+          // ignore poll errors during reset
+        }
+      })();
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [labRestartFailed, labRestarting, refresh]);
+
   const autoKey = useRef<string>("");
   useEffect(() => {
-    if (!state || state.error || state.done || !state.current) return;
+    if (labRestarting || !state || state.error || state.done || !state.current) return;
 
     const key = `${state.currentStepIndex}:${state.current.id}:${state.current.type}`;
     const run = async () => {
@@ -163,7 +204,7 @@ export default function App({ theme, setTheme }: AppProps) {
     };
 
     void run();
-  }, [state]);
+  }, [labRestarting, state]);
 
   useEffect(() => {
     if (state?.current?.type === "question") {
@@ -240,12 +281,20 @@ export default function App({ theme, setTheme }: AppProps) {
     }
   };
 
-  const onRestart = async () => {
-    if (!window.confirm("Restart the workshop from the beginning? Your progress will be reset.")) return;
+  const onRestartLab = async () => {
+    if (
+      !window.confirm(
+        "Restart the lab from the beginning? Workshop progress and all cluster state will be reset. This usually takes about a minute; kubectl may be unavailable briefly.",
+      )
+    ) {
+      return;
+    }
+    setLabRestarting(true);
+    setLabRestartFailed(null);
+    setActionErr(null);
     try {
-      const s = await restartWorkshop();
+      const s = await restartLab();
       setState(s);
-      setActionErr(null);
       setVerifyOutcome("idle");
       setHadFailure(false);
       setIncorrectPanelDismissed(false);
@@ -254,9 +303,20 @@ export default function App({ theme, setTheme }: AppProps) {
       setAnswer("");
       autoKey.current = "";
       setSidebarView("workshop");
+      await waitForLabReady();
+      setLabRestarting(false);
     } catch (e) {
-      setActionErr(String(e));
+      const msg = String(e).includes("Lab restart failed")
+        ? String(e)
+        : LAB_RESTART_FAILED_MSG;
+      setLabRestartFailed(msg);
+      setActionErr(msg);
     }
+  };
+
+  const dismissLabRestartOverlay = () => {
+    setLabRestarting(false);
+    setLabRestartFailed(null);
   };
 
   const showHints = current?.hints?.slice(0, hintCount) ?? [];
@@ -322,8 +382,34 @@ export default function App({ theme, setTheme }: AppProps) {
 
   return (
     <div
-      className={`${shell} flex h-full min-h-0 flex-col bg-[#dfe3ea] text-slate-800 dark:bg-k3-background dark:text-k3-on-background`}
+      className={`${shell} relative flex h-full min-h-0 flex-col bg-[#dfe3ea] text-slate-800 dark:bg-k3-background dark:text-k3-on-background`}
     >
+      {labRestarting && (
+        <div className="absolute inset-0 z-[100] flex flex-col items-center justify-center gap-4 bg-[#dfe3ea]/95 px-6 backdrop-blur-md dark:bg-k3-background/95">
+          {labRestartFailed ? (
+            <>
+              <MIcon name="error" className="text-5xl text-rose-600 dark:text-k3-error" filled />
+              <p className="max-w-md text-center text-sm font-medium text-slate-800 dark:text-k3-on-surface">
+                {labRestartFailed}
+              </p>
+              <button
+                type="button"
+                className="rounded-lg border border-slate-400/35 bg-white px-4 py-2 font-sans text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface dark:hover:bg-k3-surface-container-high"
+                onClick={dismissLabRestartOverlay}
+              >
+                Dismiss
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="h-12 w-12 animate-spin rounded-full border-2 border-slate-200 border-t-k3-primary-container dark:border-k3-outline-variant dark:border-t-k3-secondary" />
+              <p className="max-w-sm text-center text-sm font-medium text-slate-700 dark:text-k3-on-surface">
+                Restarting lab… This may take up to a minute. kubectl may be unavailable briefly.
+              </p>
+            </>
+          )}
+        </div>
+      )}
       {/* Top app bar — Stitch / DESIGN.md */}
       <header className="z-50 flex h-16 shrink-0 items-center justify-between border-b border-slate-400/25 bg-[#eceef3]/95 px-5 backdrop-blur-sm dark:border-k3-outline-variant dark:bg-k3-surface dark:backdrop-blur-none">
         <div className="flex min-w-0 items-center gap-6">
@@ -364,10 +450,11 @@ export default function App({ theme, setTheme }: AppProps) {
           </button>
           <button
             type="button"
-            className="hidden rounded-lg border border-rose-800/25 bg-rose-600 px-3 py-1.5 font-sans text-xs font-semibold text-white shadow-sm hover:bg-rose-700 sm:inline dark:border-rose-400/30 dark:bg-rose-700 dark:hover:bg-rose-600"
-            onClick={() => void onRestart()}
+            className="hidden rounded-lg border border-rose-800/25 bg-rose-600 px-3 py-1.5 font-sans text-xs font-semibold text-white shadow-sm hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60 sm:inline dark:border-rose-400/30 dark:bg-rose-700 dark:hover:bg-rose-600"
+            disabled={labRestarting}
+            onClick={() => void onRestartLab()}
           >
-            Restart
+            Restart lab
           </button>
           <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-400/40 bg-slate-300/50 text-xs font-bold text-slate-800 dark:border-k3-outline-variant dark:bg-k3-surface-container-highest dark:text-k3-on-background">
             {(state?.name ?? "K").slice(0, 1).toUpperCase()}
