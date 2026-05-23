@@ -48,6 +48,7 @@ func New(eng *engine.Engine, hub *loghub.Hub, labRoot string, watcher *exposure.
 	s.mux.HandleFunc("POST /api/task/run", s.handleTaskRun)
 	s.mux.HandleFunc("POST /api/question/setup", s.handleQuestionSetup)
 	s.mux.HandleFunc("POST /api/question/submit", s.handleQuestionSubmit)
+	s.mux.HandleFunc("POST /api/question/next", s.handleQuestionNext)
 	s.mux.HandleFunc("GET /api/stream/logs", s.handleLogStream)
 	s.mux.HandleFunc("GET /api/exposed", s.handleExposed)
 	s.mux.HandleFunc("GET /api/stream/exposed", s.handleExposedStream)
@@ -187,6 +188,14 @@ func (s *Server) handleQuestionSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": ok, "logs": logs, "state": s.eng.Snapshot()})
+}
+
+func (s *Server) handleQuestionNext(w http.ResponseWriter, r *http.Request) {
+	if err := s.eng.AdvanceQuestion(); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, map[string]any{"state": s.eng.Snapshot()})
 }
 
 func (s *Server) handleExposed(w http.ResponseWriter, r *http.Request) {

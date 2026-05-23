@@ -219,9 +219,10 @@ After setup finishes, the learner submits an answer; the **`verify`** script dec
 | `answer_type` | Yes | Either **`text`** (free-form input) or **`single_choice`** (radio list). |
 | `options` | If `single_choice` | Non-empty list of choice labels. The learner’s selection is passed to verify **verbatim** as `ANSWER` (the full string of the chosen option). |
 | `setup` | No | Commands to prepare the cluster **before** the learner can answer. Omit or use `[]` for no setup. |
-| `verify` | Yes | Shell script for **`bash -lc`**. The learner’s submission is in the environment variable **`ANSWER`**. Exit code **0** = correct (advance to next step); non-zero = wrong (stay on this question). |
+| `verify` | Yes | Shell script for **`bash -lc`**. The learner’s submission is in the environment variable **`ANSWER`**. Exit code **0** = correct (marks the question complete); non-zero = wrong (stay on this question). The learner advances with **Next question** in the UI after a correct verify. |
 | `hints` | No | List of strings. The UI reveals them **one at a time** when the learner clicks “Show next hint”. |
-| `incorrect_message` | No | Markdown shown when verify fails **instead of** the generic default message. Omit to use the built-in copy. |
+| `incorrect_message` | No | Markdown shown when verify fails **instead of** the generic default wrong-answer panel. Omit to use the built-in copy. The panel stays until the learner dismisses it with **×**; if they submit another wrong answer after dismissing it, the panel appears again. |
+| `correct_message` | No | Markdown shown after a correct verify. Optional; omit for no extra panel (the short “Correct!” banner still appears). The panel stays until dismissed with **×** or the learner clicks **Next question**. |
 
 ### `setup` shape
 
@@ -251,6 +252,8 @@ Rough guardrails: **task** and **question setup** up to about **10 minutes** eac
 
 - **Tasks** run automatically when their step becomes current; on success the next step loads immediately.
 - **Questions** run **setup** automatically once per step (when the step becomes current and setup is not yet done). The learner then answers and submits; **verify** runs on each submit until it exits 0.
+- After a **correct** answer, the UI stays on the same question and shows **Next question** (replacing **Submit answer**). Optional **`correct_message`** / **`incorrect_message`** panels are dismissible with **×** and do not auto-hide like the brief success/failure banners at the top of the panel.
+- **Wrong answer**: the incorrect panel (custom or default) stays visible across repeated wrong submits until dismissed. If the learner dismisses it and submits wrong again, the panel reappears.
 - **Restart workshop** in the UI resets progress **in memory** to the first step (no cluster state rollback—design your labs or scripts accordingly).
 - Progress is **per running app instance** (single shared learner if multiple browser tabs hit the same server).
 
@@ -301,7 +304,7 @@ tabs:
     - "Read the NAMESPACE column for that row"
 ```
 
-**Single choice** with custom wrong-answer copy:
+**Single choice** with custom feedback messages:
 
 ```yaml
 - id: q-svc
@@ -314,6 +317,8 @@ tabs:
     - helm install
   incorrect_message: |
     Not quite. **Services** use the `Service` API — pick the `kubectl get` that matches.
+  correct_message: |
+    Right — `kubectl get svc` lists **Service** objects in the cluster.
   verify: 'test "$ANSWER" = "kubectl get svc"'
 ```
 
@@ -325,7 +330,8 @@ A full working file ships as [lab/k3s/workshop.yml](lab/k3s/workshop.yml). Mount
 - `POST /api/workshop/restart` — reset workshop progress to the beginning (in-memory)  
 - `POST /api/task/run` — run the current **task** step  
 - `POST /api/question/setup` — run **setup** for the current question  
-- `POST /api/question/submit` — JSON `{ "answer": "..." }` runs **verify** (`ANSWER` env)  
+- `POST /api/question/submit` — JSON `{ "answer": "..." }` runs **verify** (`ANSWER` env); marks the question complete on success but does not advance  
+- `POST /api/question/next` — advance to the next step after the current question was answered correctly  
 - `GET /api/stream/logs` — SSE log stream for setup/task output  
 - `GET /api/exposed` — JSON `{ "endpoints": [...] }` for NodePort / Ingress browser links  
 - `GET /api/stream/exposed` — SSE stream of the same payload when Services or Ingresses change  

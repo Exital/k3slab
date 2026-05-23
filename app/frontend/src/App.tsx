@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import ReactMarkdown from "react-markdown";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import {
+  advanceQuestion,
   getWorkshop,
   restartWorkshop,
   runQuestionSetup,
@@ -24,6 +25,61 @@ const DEFAULT_WRONG_ANSWER_MSG =
 
 type VerifyOutcome = "idle" | "success" | "failure";
 
+function DismissibleMessagePanel({
+  variant,
+  markdown,
+  text,
+  onDismiss,
+}: {
+  variant: "success" | "error";
+  markdown: boolean;
+  text: string;
+  onDismiss: () => void;
+}) {
+  const isSuccess = variant === "success";
+  return (
+    <div
+      className={
+        isSuccess
+          ? "rounded-xl border border-emerald-200 bg-emerald-50/90 p-4 text-sm dark:border-k3-secondary/35 dark:bg-k3-secondary-container/15"
+          : "rounded-xl border border-rose-200 bg-rose-50/90 p-4 text-sm dark:border-k3-error-container/50 dark:bg-k3-surface-container"
+      }
+    >
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+      {markdown ? (
+        <div
+          className={
+            isSuccess
+              ? "text-emerald-900 dark:text-k3-secondary [&_code]:rounded [&_code]:bg-emerald-100 [&_code]:px-1.5 [&_code]:text-emerald-950 dark:[&_code]:bg-k3-surface-container-highest dark:[&_code]:text-k3-on-surface [&_p]:mb-2 [&_p:last-child]:mb-0"
+              : "text-rose-900 dark:text-k3-on-error-container [&_code]:rounded [&_code]:bg-rose-100 [&_code]:px-1.5 dark:[&_code]:bg-k3-surface-lowest [&_p]:mb-2 [&_p:last-child]:mb-0"
+          }
+        >
+          <ReactMarkdown>{text}</ReactMarkdown>
+        </div>
+      ) : (
+        <p className={isSuccess ? "text-emerald-900 dark:text-k3-secondary" : "text-rose-900 dark:text-k3-on-error-container"}>
+          {text}
+        </p>
+      )}
+        </div>
+        <button
+          type="button"
+          className={
+            isSuccess
+              ? "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-200/80 hover:text-slate-800 dark:text-k3-on-surface-variant dark:hover:bg-k3-surface-container-high dark:hover:text-k3-on-surface"
+              : "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-200/80 hover:text-slate-800 dark:text-k3-on-surface-variant dark:hover:bg-k3-surface-variant dark:hover:text-k3-on-surface"
+          }
+          aria-label="Dismiss message"
+          onClick={onDismiss}
+        >
+          <MIcon name="close" className="!text-lg" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 type AppProps = {
   theme: ThemeMode;
   setTheme: Dispatch<SetStateAction<ThemeMode>>;
@@ -36,6 +92,9 @@ export default function App({ theme, setTheme }: AppProps) {
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [answer, setAnswer] = useState("");
   const [verifyOutcome, setVerifyOutcome] = useState<VerifyOutcome>("idle");
+  const [hadFailure, setHadFailure] = useState(false);
+  const [incorrectPanelDismissed, setIncorrectPanelDismissed] = useState(false);
+  const [correctPanelDismissed, setCorrectPanelDismissed] = useState(false);
   const [hintCount, setHintCount] = useState(0);
   const [sidebarView, setSidebarView] = useState<"workshop" | string>("workshop");
   const exposedEndpoints = useExposedEndpoints();
@@ -111,6 +170,9 @@ export default function App({ theme, setTheme }: AppProps) {
       setHintCount(0);
       setAnswer("");
     }
+    setHadFailure(false);
+    setIncorrectPanelDismissed(false);
+    setCorrectPanelDismissed(false);
   }, [state?.currentStepIndex, state?.current?.id]);
 
   useEffect(() => {
@@ -121,13 +183,14 @@ export default function App({ theme, setTheme }: AppProps) {
   }, [verifyOutcome]);
 
   const current = state?.current;
+  const awaitingNext = current?.type === "question" && current.completed;
 
   const canSubmit = useMemo(() => {
     if (!current || current.type !== "question") return false;
-    if (!current.setupDone || busy) return false;
+    if (!current.setupDone || busy || awaitingNext) return false;
     if (current.answer_type === "text") return answer.trim().length > 0;
     return answer.length > 0;
-  }, [answer, busy, current]);
+  }, [answer, awaitingNext, busy, current]);
 
   const onSubmit = async () => {
     if (!current || current.type !== "question") return;
@@ -138,12 +201,36 @@ export default function App({ theme, setTheme }: AppProps) {
       setState(r.state);
       if (r.ok) {
         setVerifyOutcome("success");
+        setHadFailure(false);
+        setIncorrectPanelDismissed(false);
+        setCorrectPanelDismissed(false);
         playVerifyTone(true);
         setAnswer("");
       } else {
         setVerifyOutcome("failure");
+        setHadFailure(true);
+        setIncorrectPanelDismissed(false);
         playVerifyTone(false);
       }
+    } catch (e) {
+      setActionErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onNextQuestion = async () => {
+    setBusy(true);
+    setActionErr(null);
+    try {
+      const r = await advanceQuestion();
+      setState(r.state);
+      setVerifyOutcome("idle");
+      setHadFailure(false);
+      setIncorrectPanelDismissed(false);
+      setCorrectPanelDismissed(false);
+      setAnswer("");
+      autoKey.current = "";
     } catch (e) {
       setActionErr(String(e));
     } finally {
@@ -158,6 +245,9 @@ export default function App({ theme, setTheme }: AppProps) {
       setState(s);
       setActionErr(null);
       setVerifyOutcome("idle");
+      setHadFailure(false);
+      setIncorrectPanelDismissed(false);
+      setCorrectPanelDismissed(false);
       setHintCount(0);
       setAnswer("");
       autoKey.current = "";
@@ -175,6 +265,11 @@ export default function App({ theme, setTheme }: AppProps) {
     if (custom) return { markdown: true as const, text: custom };
     return { markdown: false as const, text: DEFAULT_WRONG_ANSWER_MSG };
   }, [current?.incorrect_message]);
+
+  const correctMessageText = current?.correct_message?.trim() ?? "";
+  const showIncorrectPanel = hadFailure && !incorrectPanelDismissed;
+  const showCorrectPanel = awaitingNext && correctMessageText.length > 0 && !correctPanelDismissed;
+  const answerDisabled = busy || awaitingNext;
 
   const progressMeta = useMemo(() => {
     if (!state || state.error) {
@@ -432,16 +527,22 @@ export default function App({ theme, setTheme }: AppProps) {
                       </div>
                     )}
 
-                    {verifyOutcome === "failure" && (
-                      <div className="rounded-xl border border-rose-200 bg-rose-50/90 p-4 text-sm dark:border-k3-error-container/50 dark:bg-k3-surface-container">
-                        {wrongAnswerCopy.markdown ? (
-                          <div className="text-rose-900 dark:text-k3-on-error-container [&_code]:rounded [&_code]:bg-rose-100 [&_code]:px-1.5 dark:[&_code]:bg-k3-surface-lowest [&_p]:mb-2 [&_p:last-child]:mb-0">
-                            <ReactMarkdown>{wrongAnswerCopy.text}</ReactMarkdown>
-                          </div>
-                        ) : (
-                          <p className="text-rose-900 dark:text-k3-on-error-container">{wrongAnswerCopy.text}</p>
-                        )}
-                      </div>
+                    {showIncorrectPanel && (
+                      <DismissibleMessagePanel
+                        variant="error"
+                        markdown={wrongAnswerCopy.markdown}
+                        text={wrongAnswerCopy.text}
+                        onDismiss={() => setIncorrectPanelDismissed(true)}
+                      />
+                    )}
+
+                    {showCorrectPanel && (
+                      <DismissibleMessagePanel
+                        variant="success"
+                        markdown
+                        text={correctMessageText}
+                        onDismiss={() => setCorrectPanelDismissed(true)}
+                      />
                     )}
 
                     {current.type === "question" && current.setupDone && (
@@ -455,7 +556,7 @@ export default function App({ theme, setTheme }: AppProps) {
                               className="w-full rounded-lg border-2 border-slate-300 bg-white px-3 py-2.5 font-mono text-sm text-slate-900 outline-none ring-0 placeholder:text-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/20 dark:border-k3-secondary dark:bg-k3-surface-lowest dark:text-k3-secondary dark:placeholder:text-k3-on-surface-variant dark:focus:border-k3-primary-container dark:focus:ring-cyan-500/20"
                               value={answer}
                               onChange={(e) => setAnswer(e.target.value)}
-                              disabled={busy}
+                              disabled={answerDisabled}
                               placeholder="Type your answer…"
                             />
                           </div>
@@ -476,7 +577,7 @@ export default function App({ theme, setTheme }: AppProps) {
                                   name="choice"
                                   checked={answer === opt}
                                   onChange={() => setAnswer(opt)}
-                                  disabled={busy}
+                                  disabled={answerDisabled}
                                 />
                                 <span className="font-mono text-sm text-slate-800 dark:text-k3-on-surface">{opt}</span>
                               </label>
@@ -485,21 +586,33 @@ export default function App({ theme, setTheme }: AppProps) {
                         )}
 
                         <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            disabled={!canSubmit || busy}
-                            className="flex w-full items-center justify-center gap-2 rounded-lg bg-k3-primary-container py-3.5 font-sans text-base font-semibold tracking-normal text-k3-on-primary-container subpixel-antialiased transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 dark:text-k3-on-primary-container"
-                            onClick={() => void onSubmit()}
-                          >
-                            Submit answer
-                            <MIcon name="arrow_forward" className="text-xl" />
-                          </button>
+                          {awaitingNext ? (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              className="flex w-full items-center justify-center gap-2 rounded-lg bg-k3-primary-container py-3.5 font-sans text-base font-semibold tracking-normal text-k3-on-primary-container subpixel-antialiased transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 dark:text-k3-on-primary-container"
+                              onClick={() => void onNextQuestion()}
+                            >
+                              Next question
+                              <MIcon name="arrow_forward" className="text-xl" />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={!canSubmit || busy}
+                              className="flex w-full items-center justify-center gap-2 rounded-lg bg-k3-primary-container py-3.5 font-sans text-base font-semibold tracking-normal text-k3-on-primary-container subpixel-antialiased transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 dark:text-k3-on-primary-container"
+                              onClick={() => void onSubmit()}
+                            >
+                              Submit answer
+                              <MIcon name="arrow_forward" className="text-xl" />
+                            </button>
+                          )}
                           {hasMoreHints && (
                             <button
                               type="button"
                               className="w-full rounded-lg border border-slate-400/35 bg-[#f4f6fa] py-2.5 font-sans text-sm font-medium tracking-normal text-slate-800 subpixel-antialiased hover:bg-slate-200/60 dark:border-k3-outline-variant dark:bg-k3-surface-container-high dark:text-k3-on-surface dark:hover:bg-k3-surface-variant"
                               onClick={() => setHintCount((c) => c + 1)}
-                              disabled={busy}
+                              disabled={answerDisabled}
                             >
                               Show next hint
                             </button>

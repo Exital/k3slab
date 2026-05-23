@@ -34,6 +34,7 @@ type rawStep struct {
 	AnswerType       string      `yaml:"answer_type"`
 	Options          []string    `yaml:"options"`
 	IncorrectMessage string      `yaml:"incorrect_message"`
+	CorrectMessage   string      `yaml:"correct_message"`
 	Setup            interface{} `yaml:"setup"`
 	Verify           string      `yaml:"verify"`
 	Hints            []string    `yaml:"hints"`
@@ -177,6 +178,7 @@ func normalizeQuestion(rs rawStep, id string) (Step, error) {
 		AnswerType:       at,
 		Options:          rs.Options,
 		IncorrectMessage: strings.TrimSpace(rs.IncorrectMessage),
+		CorrectMessage:   strings.TrimSpace(rs.CorrectMessage),
 		Setup:            setup,
 		Verify:           strings.TrimSpace(rs.Verify),
 		Hints:            rs.Hints,

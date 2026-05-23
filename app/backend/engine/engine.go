@@ -86,6 +86,7 @@ type CurrentStep struct {
 	AnswerType         workshop.AnswerType  `json:"answer_type,omitempty"`
 	Options            []string             `json:"options,omitempty"`
 	IncorrectMessage   string               `json:"incorrect_message,omitempty"`
+	CorrectMessage     string               `json:"correct_message,omitempty"`
 	Hints              []string             `json:"hints,omitempty"`
 	SetupDone          bool                 `json:"setupDone"`
 	Completed          bool                 `json:"completed"`
@@ -128,6 +129,7 @@ func (e *Engine) Snapshot() Snapshot {
 		AnswerType:        st.AnswerType,
 		Options:           append([]string(nil), st.Options...),
 		IncorrectMessage:  st.IncorrectMessage,
+		CorrectMessage:    st.CorrectMessage,
 		Hints:             append([]string(nil), st.Hints...),
 		SetupDone:         e.setupDone[e.current],
 		Completed:         e.completed[e.current],
@@ -264,7 +266,7 @@ func (e *Engine) RunQuestionSetup(ctx context.Context) (logs string, err error) 
 	return e.lastSetup.String(), nil
 }
 
-// SubmitAnswer runs verify with ANSWER set; advances on exit 0.
+// SubmitAnswer runs verify with ANSWER set; marks the question complete on exit 0 (does not advance).
 func (e *Engine) SubmitAnswer(ctx context.Context, answer string) (ok bool, logs string, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -292,9 +294,27 @@ func (e *Engine) SubmitAnswer(ctx context.Context, answer string) (ok bool, logs
 	ok = code == 0
 	if ok {
 		e.completed[e.current] = true
-		e.current++
 	}
 	return ok, e.lastVerify.String(), nil
+}
+
+// AdvanceQuestion moves to the next step after the current question was verified correct.
+func (e *Engine) AdvanceQuestion() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	st, err := e.currentStep()
+	if err != nil {
+		return err
+	}
+	if st.Type != workshop.StepQuestion {
+		return fmt.Errorf("current step is not a question")
+	}
+	if !e.completed[e.current] {
+		return fmt.Errorf("question not completed")
+	}
+	e.current++
+	e.lastVerify.Reset()
+	return nil
 }
 
 func (e *Engine) appendLine(buf *strings.Builder, line string) {

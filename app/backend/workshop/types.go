@@ -25,6 +25,7 @@ type Step struct {
 	AnswerType        AnswerType `json:"answer_type,omitempty"`
 	Options           []string   `json:"options,omitempty"`
 	IncorrectMessage  string     `json:"incorrect_message,omitempty"` // question: shown when verify fails; optional
+	CorrectMessage    string     `json:"correct_message,omitempty"`   // question: shown after verify succeeds; optional
 	Setup             []string   `json:"-"`                           // commands, not exposed as JSON in raw form
 	Verify            string     `json:"-"`
 	Hints             []string   `json:"hints,omitempty"`

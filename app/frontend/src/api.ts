@@ -19,6 +19,8 @@ export type CurrentStep = {
   options?: string[];
   /** Shown when verify fails; omit to use UI default. */
   incorrect_message?: string;
+  /** Shown after verify succeeds; optional. */
+  correct_message?: string;
   hints?: string[];
   setupDone: boolean;
   completed: boolean;
@@ -75,6 +77,13 @@ export async function submitAnswer(answer: string): Promise<{ ok: boolean; logs:
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || res.statusText);
   return body;
+}
+
+export async function advanceQuestion(): Promise<{ state: WorkshopState }> {
+  const res = await fetch("/api/question/next", { method: "POST" });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { error?: string }).error || res.statusText);
+  return body as { state: WorkshopState };
 }
 
 export function terminalWsUrl(): string {
