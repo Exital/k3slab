@@ -1,138 +1,35 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import ReactMarkdown from "react-markdown";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { FitAddon } from "@xterm/addon-fit";
-import { Terminal } from "@xterm/xterm";
 import {
   getWorkshop,
   restartWorkshop,
   runQuestionSetup,
   runTask,
   submitAnswer,
-  terminalWsUrl,
   type WorkshopState,
 } from "./api";
-import { playVerifyTone } from "./playTone";
+import { MIcon } from "./components/MIcon";
 import { useExposedEndpoints } from "./hooks/useExposedEndpoints";
+import { useTerminalDetach } from "./hooks/useTerminalDetach";
+import { TerminalView } from "./terminal/TerminalView";
+import type { ThemeMode } from "./theme";
+import { playVerifyTone } from "./playTone";
 
-const THEME_KEY = "k3slab-theme";
-export type ThemeMode = "light" | "dark";
+export type { ThemeMode };
 
 /** Default copy when verify fails and the question has no `incorrect_message` in YAML. */
 const DEFAULT_WRONG_ANSWER_MSG =
   "That doesn't match what we expected. Double-check your answer or the cluster state, then try again.";
 
-function readStoredTheme(): ThemeMode {
-  try {
-    const v = localStorage.getItem(THEME_KEY);
-    if (v === "light" || v === "dark") return v;
-  } catch {
-    /* ignore */
-  }
-  return "dark";
-}
-
-function MIcon({ name, className = "", filled }: { name: string; className?: string; filled?: boolean }) {
-  return (
-    <span className={`material-symbols-outlined ${filled ? "filled" : ""} ${className}`.trim()} aria-hidden>
-      {name}
-    </span>
-  );
-}
-
-type TerminalPaneProps = { theme: ThemeMode };
-
-function TerminalPane({ theme }: TerminalPaneProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const dark = theme === "dark";
-    const term = new Terminal({
-      cursorBlink: true,
-      fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-      fontSize: 16,
-      lineHeight: 1.25,
-      theme: dark
-        ? {
-            background: "#010f1f",
-            foreground: "#d4e4fa",
-            cursor: "#4edea3",
-            selectionBackground: "#326ce540",
-          }
-        : {
-            background: "#f8fafc",
-            foreground: "#0f172a",
-            cursor: "#0d9488",
-            selectionBackground: "#94a3b840",
-          },
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(el);
-
-    const ws = new WebSocket(terminalWsUrl());
-    ws.binaryType = "arraybuffer";
-
-    ws.onmessage = (ev) => {
-      if (typeof ev.data === "string") return;
-      const buf = new Uint8Array(ev.data as ArrayBuffer);
-      term.write(buf);
-    };
-
-    const sendResize = () => {
-      if (!term.element) return;
-      const dims = fit.proposeDimensions();
-      if (!dims || ws.readyState !== WebSocket.OPEN) return;
-      ws.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
-    };
-
-    const disposable = term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(new TextEncoder().encode(data));
-      }
-    });
-
-    ws.onopen = () => {
-      fit.fit();
-      sendResize();
-    };
-
-    const ro = new ResizeObserver(() => {
-      fit.fit();
-      sendResize();
-    });
-    ro.observe(el);
-
-    const onWin = () => {
-      fit.fit();
-      sendResize();
-    };
-    window.addEventListener("resize", onWin);
-
-    return () => {
-      window.removeEventListener("resize", onWin);
-      ro.disconnect();
-      disposable.dispose();
-      ws.close();
-      term.dispose();
-    };
-  }, [theme]);
-
-  const border =
-    theme === "dark"
-      ? "border-k3-outline-variant bg-k3-surface-lowest"
-      : "border-slate-200 bg-slate-50";
-
-  return <div ref={containerRef} className={`h-full min-h-[280px] w-full overflow-hidden p-0.5 ${border}`} />;
-}
-
 type VerifyOutcome = "idle" | "success" | "failure";
 
-export default function App() {
-  const [theme, setTheme] = useState<ThemeMode>(() => readStoredTheme());
+type AppProps = {
+  theme: ThemeMode;
+  setTheme: Dispatch<SetStateAction<ThemeMode>>;
+};
+
+export default function App({ theme, setTheme }: AppProps) {
   const [state, setState] = useState<WorkshopState | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -142,14 +39,10 @@ export default function App() {
   const [hintCount, setHintCount] = useState(0);
   const [sidebarView, setSidebarView] = useState<"workshop" | string>("workshop");
   const exposedEndpoints = useExposedEndpoints();
+  const { detached, detach, dock, popupBlocked } = useTerminalDetach();
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(THEME_KEY, theme);
-    } catch {
-      /* ignore */
-    }
-  }, [theme]);
+  const chromeBtn =
+    "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-400/30 bg-slate-200/80 text-slate-700 transition hover:border-k3-secondary/50 hover:bg-white dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface-variant dark:hover:border-k3-secondary/40 dark:hover:bg-k3-surface-container-high";
 
   const refresh = useCallback(async () => {
     setVerifyOutcome("idle");
@@ -347,6 +240,23 @@ export default function App() {
           </nav>
         </div>
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          {detached && (
+            <button
+              type="button"
+              className="flex items-center gap-1.5 rounded-lg border border-slate-400/35 bg-white/80 px-2.5 py-1.5 font-mono text-xs font-medium text-slate-800 shadow-sm transition hover:border-k3-secondary/50 hover:bg-white dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface dark:hover:border-k3-secondary/40 dark:hover:bg-k3-surface-container-high"
+              aria-label="Dock terminal back into lab"
+              title="Dock terminal back into lab"
+              onClick={dock}
+            >
+              <MIcon name="close_fullscreen" className="!text-base" />
+              <span className="hidden sm:inline">Terminal</span>
+            </button>
+          )}
+          {popupBlocked && !detached && (
+            <span className="max-w-[12rem] text-xs text-rose-700 dark:text-k3-error" role="status">
+              Pop-up blocked
+            </span>
+          )}
           <button
             type="button"
             className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-300/40 hover:text-slate-900 dark:text-k3-on-surface-variant dark:hover:bg-k3-surface-variant dark:hover:text-k3-primary"
@@ -429,8 +339,18 @@ export default function App() {
         </aside>
 
         {/* Instruction + terminal */}
-        <PanelGroup direction="horizontal" className="min-h-0 min-w-0 flex-1">
-          <Panel defaultSize={34} minSize={22} className="min-h-0 min-w-[240px]">
+        <PanelGroup
+          direction="horizontal"
+          className="min-h-0 min-w-0 flex-1"
+          autoSaveId={detached ? undefined : "k3slab-main-split"}
+        >
+          <Panel
+            id="instruction"
+            order={1}
+            defaultSize={detached ? 100 : 34}
+            minSize={22}
+            className="min-h-0 min-w-[240px]"
+          >
             <section className="relative flex h-full min-h-0 flex-col overflow-hidden border-r border-slate-400/20 bg-[#eef1f6] dark:border-k3-outline-variant dark:bg-k3-surface">
               {sidebarView === "workshop" && overlayLabel && (
                 <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#eef1f6]/95 backdrop-blur-md dark:bg-k3-surface-lowest/90">
@@ -608,11 +528,13 @@ export default function App() {
             </section>
           </Panel>
 
+          {!detached && (
+            <>
           <PanelResizeHandle className="group relative w-2 shrink-0 cursor-col-resize bg-slate-300/50 dark:bg-k3-surface-low">
             <span className="absolute inset-y-8 left-1/2 w-0.5 -translate-x-1/2 rounded-full bg-slate-500/50 opacity-0 transition-opacity group-hover:opacity-100 dark:bg-k3-outline" />
           </PanelResizeHandle>
 
-          <Panel defaultSize={66} minSize={38} className="min-h-0 min-w-0">
+          <Panel id="terminal" order={2} defaultSize={66} minSize={38} className="min-h-0 min-w-0">
             <section className="flex h-full min-h-0 flex-col overflow-hidden border-slate-400/15 bg-[#e4e7ee] dark:border-k3-outline-variant dark:bg-k3-surface-lowest k3-terminal-glow">
               <div className="flex h-12 shrink-0 items-center gap-2 overflow-hidden border-b border-slate-400/20 bg-[#d8dce5] px-3 dark:border-k3-outline-variant dark:bg-k3-surface-container-high">
                 <div className="flex shrink-0 items-center gap-3">
@@ -627,7 +549,16 @@ export default function App() {
                     connected: lab shell
                   </span>
                 </div>
-                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+                <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto">
+                  <button
+                    type="button"
+                    className={chromeBtn}
+                    aria-label="Open terminal in new window"
+                    title="Open terminal in new window"
+                    onClick={detach}
+                  >
+                    <MIcon name="open_in_new" className="!text-lg" />
+                  </button>
                   <span className="shrink-0 rounded-md border border-slate-400/30 bg-slate-200/80 px-2 py-1 font-mono text-xs font-medium text-slate-800 dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface">
                     Terminal
                   </span>
@@ -646,7 +577,7 @@ export default function App() {
                 </div>
               </div>
               <div className="min-h-0 flex-1 overflow-hidden p-2 sm:p-3">
-                <TerminalPane theme={theme} />
+                <TerminalView theme={theme} mode="session" active />
               </div>
               <div className="flex h-8 shrink-0 items-center justify-between border-t border-slate-400/20 bg-[#dce0e8] px-3 font-mono text-xs text-slate-600 dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface-variant">
                 <div className="flex items-center gap-3">
@@ -657,6 +588,8 @@ export default function App() {
               </div>
             </section>
           </Panel>
+            </>
+          )}
         </PanelGroup>
       </div>
     </div>

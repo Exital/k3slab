@@ -38,6 +38,13 @@ body,
   animation: k3fade-in 0.28s ease-out forwards;
 }
 
+html.k3-terminal-popout,
+html.k3-terminal-popout body,
+html.k3-terminal-popout #root {
+  height: 100%;
+  margin: 0;
+}
+
 /* Success: strong green ring + outer glow (box-shadow only — no transform, avoids clash with k3fade-in) */
 @keyframes k3-success-pulse {
   0% {
