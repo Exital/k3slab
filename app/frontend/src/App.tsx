@@ -197,7 +197,9 @@ export default function App({ theme, setTheme }: AppProps) {
     setBusy(true);
     setActionErr(null);
     try {
-      const r = await submitAnswer(answer);
+      const r = await submitAnswer(
+        current.answer_type === "text" ? answer.trim() : answer,
+      );
       setState(r.state);
       if (r.ok) {
         setVerifyOutcome("success");

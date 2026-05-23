@@ -286,6 +286,7 @@ func (e *Engine) SubmitAnswer(ctx context.Context, answer string) (ok bool, logs
 	e.lastVerify.Reset()
 	ctx, cancel := context.WithTimeout(ctx, verifyTimeout)
 	defer cancel()
+	answer = strings.TrimSpace(answer)
 	env := append(e.kubeEnv(), "ANSWER="+answer)
 	code, err := e.runShellWithEnv(ctx, st.Verify, &e.lastVerify, e.hub, env)
 	if err != nil {

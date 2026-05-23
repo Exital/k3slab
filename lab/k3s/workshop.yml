@@ -20,7 +20,7 @@ tabs:
         Correct — the failing pod is in the **`broken-demo`** namespace. You can inspect it with
         `kubectl get pods -n broken-demo` or `kubectl describe pod -n broken-demo`.
       verify: |
-        kubectl get pods -A | grep -q CrashLoopBackOff && test "$ANSWER" = "broken-demo"
+        test "$ANSWER" = "broken-demo"
       hints:
         - "Try `kubectl get pods -A`"
         - "Read the NAMESPACE column for the row whose STATUS contains CrashLoopBackOff"
