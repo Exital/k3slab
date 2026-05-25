@@ -80,7 +80,7 @@ COPY lab /lab
 
 ENV KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 ENV LABS_ROOT=/lab
-ENV LAB_ID=01-k3s
+ENV LAB_ID=01-kubectl-basics
 ENV K3SLAB_LISTEN=0.0.0.0:3010
 ENV K3SLAB_STATIC_DIR=/app/frontend/dist
 ENV k9s_enable=false

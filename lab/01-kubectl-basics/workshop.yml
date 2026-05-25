@@ -1,0 +1,154 @@
+name: kubectl Basics
+description: Eight guided kubectl exercises on a small in-cluster sandbox.
+
+tabs:
+  steps:
+    - id: prepare-lab
+      type: task
+      title: Prepare the lab cluster
+      run: bash scripts/setup.sh
+
+    - id: question-nodes
+      type: question
+      title: How many nodes are Ready?
+      description: |
+        Use `kubectl` to see cluster nodes and their status.
+        Submit the **number of nodes** that show **Ready** in the STATUS column.
+      answer_type: text
+      correct_message: |
+        Correct — this lab runs a single-node **K3s** cluster, so you should see **1** Ready node.
+      verify: |
+        test "$ANSWER" = "1"
+      hints:
+        - "Try `kubectl get nodes`"
+        - "Count rows whose STATUS contains Ready"
+
+    - id: question-namespace
+      type: question
+      title: Lab workload namespace
+      description: |
+        This lab created a dedicated namespace for its workloads.
+        Submit the **namespace name** (from `kubectl get ns` or `kubectl get all -A`).
+      answer_type: text
+      correct_message: |
+        Right — workloads for this lab live in **`kubectl-basics`**.
+      verify: |
+        test "$ANSWER" = "kubectl-basics"
+      hints:
+        - "Run `kubectl get namespaces`"
+        - "Look for a namespace that is not default, kube-system, or kube-public"
+
+    - id: question-deployment
+      type: question
+      title: Web app Deployment name
+      description: |
+        In the lab namespace, find the **Deployment** that runs the nginx web app (2 replicas).
+        Submit the **Deployment name**.
+      answer_type: text
+      correct_message: |
+        Correct — the web app Deployment is named **`web`**.
+      verify: |
+        test "$ANSWER" = "web"
+      hints:
+        - "Try `kubectl get deployments -n kubectl-basics`"
+        - "The name is short — four letters"
+
+    - id: question-replicas
+      type: question
+      title: Ready replicas on the web Deployment
+      description: |
+        How many pods are **ready** for the **web** Deployment?
+        Submit that number (from `kubectl get deploy` or `kubectl get pods`).
+      answer_type: text
+      correct_message: |
+        Correct — **web** runs **2** ready replicas.
+      verify: |
+        test "$ANSWER" = "2"
+      hints:
+        - "`kubectl get deploy web -n kubectl-basics`"
+        - "Check READY column (e.g. 2/2)"
+
+    - id: question-service-name
+      type: question
+      title: Service name for the web app
+      description: |
+        What is the name of the **Service** that selects the web app pods?
+        Submit the **Service name**.
+      answer_type: text
+      correct_message: |
+        Correct — the Service is **`web-svc`**.
+      verify: |
+        test "$ANSWER" = "web-svc"
+      hints:
+        - "Try `kubectl get svc -n kubectl-basics`"
+        - "Name ends with -svc"
+
+    - id: question-service-port
+      type: question
+      title: Service port
+      description: |
+        For **web-svc** in namespace **kubectl-basics**, what **port** does the Service expose (PORT column)?
+        Submit the port number only.
+      answer_type: text
+      correct_message: |
+        Correct — **web-svc** exposes port **80**.
+      verify: |
+        test "$ANSWER" = "80"
+      hints:
+        - "`kubectl get svc web-svc -n kubectl-basics`"
+        - "Standard HTTP port"
+
+    - id: question-logs
+      type: question
+      title: Logger pod message
+      description: |
+        A **logger** Deployment prints a fixed line in its logs.
+        Find a logger pod in **kubectl-basics**, run `kubectl logs`, and submit the **exact message** you see (one line).
+      answer_type: text
+      correct_message: |
+        Correct — the logger prints **`k3slab-log-ok`**.
+      verify: |
+        test "$ANSWER" = "k3slab-log-ok"
+      hints:
+        - "`kubectl get pods -n kubectl-basics -l app=logger`"
+        - "`kubectl logs <pod-name> -n kubectl-basics`"
+
+    - id: question-pods-all-ns
+      type: question
+      title: List pods in all namespaces
+      answer_type: single_choice
+      options:
+        - kubectl get pods
+        - kubectl get pods -A
+        - kubectl get nodes -A
+      incorrect_message: |
+        Not quite — you need a command that lists **pods** across **all namespaces**.
+      correct_message: |
+        Right — **`kubectl get pods -A`** (or `--all-namespaces`) lists pods in every namespace.
+      verify: |
+        test "$ANSWER" = "kubectl get pods -A"
+      hints:
+        - "The `-A` flag means all namespaces"
+
+  markdowns:
+    - id: cheat-sheet
+      title: Cheat sheet
+      icon: description
+      content: |
+        ## Useful commands
+
+        - Nodes: `kubectl get nodes`
+        - All namespaces: `kubectl get ns`
+        - Workloads in the lab: `kubectl get all -n kubectl-basics`
+        - Describe: `kubectl describe deploy web -n kubectl-basics`
+        - Logs: `kubectl logs <pod> -n kubectl-basics`
+        - Services: `kubectl get svc -n kubectl-basics`
+        - Pods everywhere: `kubectl get pods -A`
+
+    - id: lab-info
+      title: Lab info
+      icon: info
+      content: |
+        This lab runs **K3s** inside the container. Use the web terminal with `kubectl` against the local cluster.
+
+        Labs live under **`LABS_ROOT`** (default `/lab`). Each lab is a subdirectory with its own `workshop.yml` (this lab is **`01-kubectl-basics`**).

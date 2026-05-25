@@ -32,75 +32,17 @@ Open **`http://127.0.0.1:3010`** (recommended on Docker Desktop). If that works 
 
 ### Opening apps (NodePort / Ingress)
 
-When you expose workloads with **NodePort** Services or **Ingress** resources, the **terminal title bar** shows **Open in browser** tabs. They appear and disappear automatically as you create or delete Services and Ingresses (the API watches the cluster and pushes updates over SSE).
-
-Links open on your **host** browser. There is no reverse proxy on port 3010 — you must publish the same ports on `docker run -p` that the workload uses inside the container.
-
-| Exposure | Container port | Typical `docker run` |
-|----------|----------------|----------------------|
-| Workshop UI | 3010 | `-p 3010:3010` |
-| Ingress (K3s Traefik, HTTP) | **80** | `-p 80:80` |
-| Ingress (HTTPS / TLS) | **443** | `-p 443:443` |
-| NodePort | **30000–32767** (per Service) | `-p <nodePort>:<nodePort>` (match `kubectl get svc`) |
-
-**Build and run** (rebuild the image after pulling code changes):
-
-```bash
-docker build -f docker/Dockerfile -t k3slab:test .
-
-docker run --rm --name k3slab \
-  --privileged \
-  --cgroupns=host \
-  -p 3010:3010 \
-  -p 80:80 \
-  -p 443:443 \
-  -p 30010:30010 \
-  -e K3SLAB_PUBLIC_ORIGIN=http://127.0.0.1 \
-  k3slab:test
-```
-
-**Sample manifests** (from the web terminal while the **01-k3s** lab is active; paths are relative to that lab directory):
-
-| File | What it does | Tab label (example) | Open in browser |
-|------|----------------|---------------------|-----------------|
-| [lab/01-k3s/manifests/demo-ingress.yml](lab/01-k3s/manifests/demo-ingress.yml) | nginx + Ingress on `localhost` / `/my_app` | `localhost/my_app` | `http://localhost/my_app/` |
-| [lab/01-k3s/manifests/demo-nodeport.yml](lab/01-k3s/manifests/demo-nodeport.yml) | nginx + NodePort **30010** | `web:30010` | `http://127.0.0.1:30010/` (with origin above) |
-
-```bash
-kubectl apply -f manifests/demo-ingress.yml
-kubectl apply -f manifests/demo-nodeport.yml
-```
-
-Ingress rules must use a **DNS hostname** (e.g. `localhost`), not an IP — Kubernetes rejects IP addresses in `spec.rules[].host`.
-
-#### Tab labels and URLs
-
-The UI shows the backend **`label`**; the click opens **`url`** (also shown on hover).
-
-| Kind | Tab label | URL |
-|------|-----------|-----|
-| **NodePort** | `{serviceName}:{nodePort}` | `{K3SLAB_PUBLIC_ORIGIN host}:{nodePort}/` |
-| **Ingress (HTTP)** | `{host}` or `{host}{path}` if path is not `/` | `http://{host}{path}` (port 80 omitted) |
-| **Ingress (HTTPS)** | same as HTTP + ` (https)` | `https://{host}{path}` when TLS covers that host |
-
-`K3SLAB_PUBLIC_ORIGIN` affects **NodePort URLs only**. Ingress tabs always use the **hostname from the Ingress rule** (not the public-origin host).
+If a workshop or your own manifests create **NodePort** Services or **Ingress** resources, the **terminal title bar** may show **Open in browser** tabs (the API watches the cluster over SSE). Links open on your **host** browser; there is no reverse proxy on port 3010. The default **`kubectl Basics`** lab only needs **`-p 3010:3010`**. To try Ingress or NodePort yourself, publish the matching ports (e.g. `-p 80:80`, `-p <nodePort>:<nodePort>`) and set **`K3SLAB_PUBLIC_ORIGIN`** for NodePort URLs if needed.
 
 #### Environment variables
 
-- **`K3SLAB_PUBLIC_ORIGIN`** (optional): scheme + host for **NodePort** links. Default `http://localhost`. Use `http://127.0.0.1` if `localhost` resolves to IPv6 (`::1`) but Docker published IPv4 only.
+- **`K3SLAB_PUBLIC_ORIGIN`** (optional): scheme + host for **NodePort** links. Default `http://localhost`.
 - **`K3SLAB_INGRESS_HTTP_PORT`** / **`K3SLAB_INGRESS_HTTPS_PORT`** (optional): defaults **80** / **443** for Ingress URLs if you customized Traefik.
 - **`k9s_enable`** (optional): default **`false`**. Set to **`true`** (or `1` / `yes`) to put the pre-installed **k9s** binary on `PATH`. The image bundles k9s at `/usr/local/lib/k3slab/k9s`; the entrypoint symlinks it to `/usr/local/bin/k9s` only when enabled.
 - **`K3SLAB_DEBUG`** (optional): set to **`true`** (or `1` / `yes`) to log exposure watcher sync/resync messages (`exposure: synced …`, `exposure: periodic resync …`). Off by default so routine logs stay quiet.
 - **`K3SLAB_ALLOW_CLUSTER_RESET`** (optional): default **`true`**. Set to **`false`** (or `0` / `no`) to disable **Restart lab** and **lab switching** (`POST /api/lab/restart`, `POST /api/labs/select`).
 - **`LABS_ROOT`** (optional): parent directory of lab subfolders; default **`/lab`**.
-- **`LAB_ID`** (optional): active lab folder name on startup (e.g. **`01-k3s`**); default **`01-k3s`** in the image.
-
-#### Troubleshooting tabs
-
-1. **Rebuild the image** after updating k3slab — `docker build` then `docker run` (Docker does not pull `k3slab:test` from a registry; a missing local image fails with “pull access denied”).
-2. **Publish ports** — e.g. `-p 80:80` for Ingress, `-p 30010:30010` for the demo NodePort.
-3. **Check the API** — `curl -s http://127.0.0.1:3010/api/exposed` should list `endpoints` (not `null`) after you apply a NodePort Service or Ingress.
-4. **Ingress host** — open the URL with the rule’s host (e.g. `http://localhost/my_app/`, not `http://127.0.0.1/my_app/` unless the rule uses that host).
+- **`LAB_ID`** (optional): active lab folder name on startup (e.g. **`01-kubectl-basics`**); default **`01-kubectl-basics`** in the image.
 
 #### Runtime tools in the image
 
@@ -118,11 +60,11 @@ Pin the bundled k9s version at build time: `docker build --build-arg K9S_VERSION
 
 ### Custom labs mount
 
-Labs live under **`LABS_ROOT`** (default **`/lab`**). Each **immediate subdirectory** with a `workshop.yml` is one lab (e.g. `lab/01-k3s`, `lab/02-demo`). The UI lists all labs and lets learners switch (switching resets the cluster).
+Labs live under **`LABS_ROOT`** (default **`/lab`**). Each **immediate subdirectory** with a `workshop.yml` is one lab (e.g. `lab/01-kubectl-basics`). The UI lists all labs and lets learners switch (switching resets the cluster).
 
 #### Lab order in the picker and menu
 
-The catalog is sorted **alphabetically by folder name** (the lab `id`). To control display order, prefix directory names with numbers, e.g. **`01-kubernetes-basics`**, **`02-networking`**, **`03-demo`**. The shipped labs use **`01-k3s`** and **`02-demo`** so the main workshop appears first.
+The catalog is sorted **alphabetically by folder name** (the lab `id`). To control display order, prefix directory names with numbers, e.g. **`01-kubectl-basics`**, **`02-networking`**. The shipped lab is **`01-kubectl-basics`**.
 
 Mount your own lab tree:
 
@@ -174,13 +116,13 @@ If reset fails, restart the container (`docker run …` again) for a clean slate
 | [docker/k3s-lifecycle.sh](docker/k3s-lifecycle.sh) | Shared K3s start/stop/wait/reset helpers (entrypoint + API reset) |
 | [docker/cluster-reset.sh](docker/cluster-reset.sh) | Cluster wipe script invoked by `POST /api/lab/restart` |
 | [app/backend](app/backend) | Go API: workshop engine, exposure watcher, SSE logs, PTY WebSocket terminal |
-| [lab/01-k3s/manifests](lab/01-k3s/manifests) | Sample manifests (workshop + demo Ingress / NodePort) |
+| [lab/01-kubectl-basics](lab/01-kubectl-basics) | Shipped **kubectl Basics** workshop (`workshop.yml`, manifests, scripts) |
 | [app/frontend](app/frontend) | Vite + React + Tailwind + xterm.js |
-| [lab](lab) | Baked-in labs tree (`01-k3s/`, `02-demo/`, each with `workshop.yml`) |
+| [lab](lab) | Baked-in labs tree (one lab per subdirectory with `workshop.yml`) |
 
 ## Writing workshops (`workshop.yml`)
 
-The UI loads **`workshop.yml`** from the active lab directory under **`LABS_ROOT`** (default **`/lab/<lab-id>`**, shipped as **`01-k3s`**). The workshop defines a linear sequence of **`tabs.steps`** (tasks and questions) plus optional **`tabs.markdowns`** panels shown in the sidebar.
+The UI loads **`workshop.yml`** from the active lab directory under **`LABS_ROOT`** (default **`/lab/<lab-id>`**, shipped as **`01-kubectl-basics`**). The workshop defines a linear sequence of **`tabs.steps`** (tasks and questions) plus optional **`tabs.markdowns`** panels shown in the sidebar.
 
 ### Top-level fields
 
@@ -352,7 +294,7 @@ tabs:
   verify: 'test "$ANSWER" = "kubectl get svc"'
 ```
 
-A full working file ships as [lab/01-k3s/workshop.yml](lab/01-k3s/workshop.yml). Mount your own tree over **`/lab`** (see [Custom labs mount](#custom-labs-mount)) to add or edit labs without rebuilding the image.
+A full working file ships as [lab/01-kubectl-basics/workshop.yml](lab/01-kubectl-basics/workshop.yml). Mount your own tree over **`/lab`** (see [Custom labs mount](#custom-labs-mount)) to add or edit labs without rebuilding the image.
 
 ## API (same origin as UI)
 
