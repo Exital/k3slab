@@ -32,7 +32,23 @@ Open **`http://127.0.0.1:3010`** (recommended on Docker Desktop). If that works 
 
 ### Opening apps (NodePort / Ingress)
 
-If a workshop or your own manifests create **NodePort** Services or **Ingress** resources, the **terminal title bar** may show **Open in browser** tabs (the API watches the cluster over SSE). Links open on your **host** browser; there is no reverse proxy on port 3010. The default **`kubectl Basics`** lab only needs **`-p 3010:3010`**. To try Ingress or NodePort yourself, publish the matching ports (e.g. `-p 80:80`, `-p <nodePort>:<nodePort>`) and set **`K3SLAB_PUBLIC_ORIGIN`** for NodePort URLs if needed.
+If a workshop or your own manifests create **NodePort** Services or **Ingress** resources, the **terminal title bar** may show **Open in browser** tabs (the API watches the cluster over SSE). Links open on your **host** browser; there is no reverse proxy on port 3010.
+
+| Lab | Ports to publish | URL (after fixes) |
+|-----|------------------|-------------------|
+| **kubectl Basics** (`01-kubectl-basics`) | `-p 3010:3010` | Workshop UI only |
+| **Deployment Basics** (`02-deployment-basics`) | `-p 3010:3010` **and** `-p 80:80` | **`http://localhost/ctf/`** for the [simple-ctf](https://github.com/Exital/simple-ctf) app |
+
+Example for the deployment lab:
+
+```bash
+docker run --rm --name k3slab \
+  --privileged --cgroupns=host \
+  -p 3010:3010 -p 80:80 \
+  k3slab:latest
+```
+
+For other Ingress or NodePort workloads, publish the matching ports and set **`K3SLAB_PUBLIC_ORIGIN`** for NodePort URLs if needed.
 
 #### Environment variables
 
@@ -64,7 +80,7 @@ Labs live under **`LABS_ROOT`** (default **`/lab`**). Each **immediate subdirect
 
 #### Lab order in the picker and menu
 
-The catalog is sorted **alphabetically by folder name** (the lab `id`). To control display order, prefix directory names with numbers, e.g. **`01-kubectl-basics`**, **`02-networking`**. The shipped lab is **`01-kubectl-basics`**.
+The catalog is sorted **alphabetically by folder name** (the lab `id`). To control display order, prefix directory names with numbers. Shipped labs: **`01-kubectl-basics`**, **`02-deployment-basics`**.
 
 Mount your own lab tree:
 
@@ -116,9 +132,10 @@ If reset fails, restart the container (`docker run …` again) for a clean slate
 | [docker/k3s-lifecycle.sh](docker/k3s-lifecycle.sh) | Shared K3s start/stop/wait/reset helpers (entrypoint + API reset) |
 | [docker/cluster-reset.sh](docker/cluster-reset.sh) | Cluster wipe script invoked by `POST /api/lab/restart` |
 | [app/backend](app/backend) | Go API: workshop engine, exposure watcher, SSE logs, PTY WebSocket terminal |
-| [lab/01-kubectl-basics](lab/01-kubectl-basics) | Shipped **kubectl Basics** workshop (`workshop.yml`, manifests, scripts) |
+| [lab/01-kubectl-basics](lab/01-kubectl-basics) | **kubectl Basics** — intro `kubectl` questions |
+| [lab/02-deployment-basics](lab/02-deployment-basics) | **Deployment Basics** — fix Deployment/Service/Ingress for [simple-ctf](https://github.com/Exital/simple-ctf) at `/ctf` |
 | [app/frontend](app/frontend) | Vite + React + Tailwind + xterm.js |
-| [lab](lab) | Baked-in labs tree (one lab per subdirectory with `workshop.yml`) |
+| [lab](lab) | Baked-in labs tree (`01-kubectl-basics/`, `02-deployment-basics/`, …) |
 
 ## Writing workshops (`workshop.yml`)
 

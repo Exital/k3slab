@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: simple-ctf-entrypoint
+  namespace: deployment-basics
+data:
+  check-and-start.sh: |
+    #!/bin/sh
+    set -e
+    if [ "$CTF_RELAY_MODE" != "active" ]; then
+      echo "ERROR: CTF_RELAY_MODE must be set to active"
+      exit 1
+    fi
+    exec /docker-entrypoint.sh node server/index.js

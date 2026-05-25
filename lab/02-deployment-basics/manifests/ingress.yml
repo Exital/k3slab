@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: simple-ctf-ingress
+  namespace: deployment-basics
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: deployment-basics-strip-ctf-prefix@kubernetescrd
+spec:
+  rules:
+    - host: localhost
+      http:
+        paths:
+          - path: /ctf
+            pathType: Prefix
+            backend:
+              service:
+                name: simple-ctf
+                port:
+                  number: 3000

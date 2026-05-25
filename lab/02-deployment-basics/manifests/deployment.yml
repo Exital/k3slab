@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: simple-ctf
+  namespace: deployment-basics
+  labels:
+    app: simple-ctf
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: simple-ctf
+  template:
+    metadata:
+      labels:
+        app: simple-ctf
+    spec:
+      containers:
+        - name: simple-ctf
+          image: ghcr.io/exital/simple-ctf:wrong_tag
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          command:
+            - /bin/sh
+            - /mnt/lab/check-and-start.sh
+          volumeMounts:
+            - name: lab-entrypoint
+              mountPath: /mnt/lab
+              readOnly: true
+      volumes:
+        - name: lab-entrypoint
+          configMap:
+            name: simple-ctf-entrypoint
+            defaultMode: 0755
