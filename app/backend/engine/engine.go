@@ -92,9 +92,10 @@ type CurrentStep struct {
 	Options            []string             `json:"options,omitempty"`
 	IncorrectMessage   string               `json:"incorrect_message,omitempty"`
 	CorrectMessage     string               `json:"correct_message,omitempty"`
-	Hints              []string             `json:"hints,omitempty"`
-	SetupDone          bool                 `json:"setupDone"`
-	Completed          bool                 `json:"completed"`
+	Hints                 []string             `json:"hints,omitempty"`
+	PollIntervalSeconds   int                  `json:"poll_interval_seconds,omitempty"`
+	SetupDone             bool                 `json:"setupDone"`
+	Completed             bool                 `json:"completed"`
 }
 
 func (e *Engine) Snapshot() Snapshot {
@@ -135,9 +136,10 @@ func (e *Engine) Snapshot() Snapshot {
 		Options:           append([]string(nil), st.Options...),
 		IncorrectMessage:  st.IncorrectMessage,
 		CorrectMessage:    st.CorrectMessage,
-		Hints:             append([]string(nil), st.Hints...),
-		SetupDone:         e.setupDone[e.current],
-		Completed:         e.completed[e.current],
+		Hints:               append([]string(nil), st.Hints...),
+		PollIntervalSeconds: st.PollIntervalSeconds,
+		SetupDone:           e.setupDone[e.current],
+		Completed:           e.completed[e.current],
 	}
 	return snap
 }
@@ -282,6 +284,9 @@ func (e *Engine) SubmitAnswer(ctx context.Context, answer string) (ok bool, logs
 	if st.Type != workshop.StepQuestion {
 		return false, "", fmt.Errorf("current step is not a question")
 	}
+	if st.AnswerType == workshop.AnswerObserve {
+		return false, "", fmt.Errorf("observe questions use automatic checking, not submit")
+	}
 	if !e.setupDone[e.current] {
 		return false, "", fmt.Errorf("setup not completed for this question")
 	}
@@ -294,6 +299,41 @@ func (e *Engine) SubmitAnswer(ctx context.Context, answer string) (ok bool, logs
 	answer = strings.TrimSpace(answer)
 	env := append(e.kubeEnv(), "ANSWER="+answer)
 	code, err := e.runShellWithEnv(ctx, st.Verify, &e.lastVerify, e.hub, env)
+	if err != nil {
+		return false, e.lastVerify.String(), err
+	}
+	ok = code == 0
+	if ok {
+		e.completed[e.current] = true
+	}
+	return ok, e.lastVerify.String(), nil
+}
+
+// CheckQuestion runs verify for observe questions (no ANSWER); marks complete on exit 0.
+// Verify output is not broadcast to the log hub (quiet polls).
+func (e *Engine) CheckQuestion(ctx context.Context) (ok bool, logs string, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	st, err := e.currentStep()
+	if err != nil {
+		return false, "", err
+	}
+	if st.Type != workshop.StepQuestion {
+		return false, "", fmt.Errorf("current step is not a question")
+	}
+	if st.AnswerType != workshop.AnswerObserve {
+		return false, "", fmt.Errorf("current question is not observe type")
+	}
+	if !e.setupDone[e.current] {
+		return false, "", fmt.Errorf("setup not completed for this question")
+	}
+	if e.completed[e.current] {
+		return true, e.lastVerify.String(), nil
+	}
+	e.lastVerify.Reset()
+	ctx, cancel := context.WithTimeout(ctx, verifyTimeout)
+	defer cancel()
+	code, err := e.runShellWithEnv(ctx, st.Verify, &e.lastVerify, nil, e.kubeEnv())
 	if err != nil {
 		return false, e.lastVerify.String(), err
 	}

@@ -1,5 +1,5 @@
 export type StepType = "question" | "task";
-export type AnswerType = "text" | "single_choice";
+export type AnswerType = "text" | "single_choice" | "observe";
 
 /** Sidebar reference tab from workshop `tabs.markdowns` (Material Symbols icon name in `icon`). */
 export type SidebarTab = {
@@ -22,6 +22,7 @@ export type CurrentStep = {
   /** Shown after verify succeeds; optional. */
   correct_message?: string;
   hints?: string[];
+  poll_interval_seconds?: number;
   setupDone: boolean;
   completed: boolean;
 };
@@ -145,6 +146,13 @@ export async function submitAnswer(answer: string): Promise<{ ok: boolean; logs:
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ answer }),
   });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+
+export async function checkQuestion(): Promise<{ ok: boolean; logs: string; state: WorkshopState }> {
+  const res = await fetch("/api/question/check", { method: "POST" });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || res.statusText);
   return body;

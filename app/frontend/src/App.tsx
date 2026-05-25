@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import {
   advanceQuestion,
+  checkQuestion,
   getLabStatus,
   getLabs,
   getWorkshop,
@@ -114,6 +115,8 @@ export default function App({ theme, setTheme }: AppProps) {
   const exposedEndpoints = useExposedEndpoints();
   const { detached, detach, dock, popupBlocked } = useTerminalDetach();
   const autoKey = useRef<string>("");
+  const checkInFlight = useRef(false);
+  const observePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const chromeBtn =
     "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-400/30 bg-slate-200/80 text-slate-700 transition hover:border-k3-secondary/50 hover:bg-white dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface-variant dark:hover:border-k3-secondary/40 dark:hover:bg-k3-surface-container-high";
@@ -303,10 +306,65 @@ export default function App({ theme, setTheme }: AppProps) {
 
   const canSubmit = useMemo(() => {
     if (!current || current.type !== "question") return false;
+    if (current.answer_type === "observe") return false;
     if (!current.setupDone || busy || awaitingNext) return false;
     if (current.answer_type === "text") return answer.trim().length > 0;
     return answer.length > 0;
   }, [answer, awaitingNext, busy, current]);
+
+  const runObserveCheck = useCallback(async () => {
+    if (!current || current.type !== "question" || current.answer_type !== "observe") return;
+    if (!current.setupDone || current.completed || checkInFlight.current || busy) return;
+    checkInFlight.current = true;
+    try {
+      const r = await checkQuestion();
+      setState(r.state);
+      if (r.ok) {
+        setVerifyOutcome("success");
+        setHadFailure(false);
+        setIncorrectPanelDismissed(false);
+        setCorrectPanelDismissed(false);
+        playVerifyTone(true);
+      }
+    } catch (e) {
+      setActionErr(String(e));
+    } finally {
+      checkInFlight.current = false;
+    }
+  }, [busy, current]);
+
+  useEffect(() => {
+    if (observePollRef.current) {
+      window.clearInterval(observePollRef.current);
+      observePollRef.current = null;
+    }
+    if (
+      labRestarting ||
+      !current ||
+      current.type !== "question" ||
+      current.answer_type !== "observe" ||
+      !current.setupDone ||
+      current.completed
+    ) {
+      return;
+    }
+    const intervalSec = current.poll_interval_seconds ?? 5;
+    void runObserveCheck();
+    observePollRef.current = window.setInterval(() => {
+      void runObserveCheck();
+    }, intervalSec * 1000);
+    return () => {
+      if (observePollRef.current) {
+        window.clearInterval(observePollRef.current);
+        observePollRef.current = null;
+      }
+    };
+  }, [
+    current,
+    labRestarting,
+    runObserveCheck,
+    state?.currentStepIndex,
+  ]);
 
   const onSubmit = async () => {
     if (!current || current.type !== "question") return;
@@ -742,6 +800,13 @@ export default function App({ theme, setTheme }: AppProps) {
 
                     {current.type === "question" && current.setupDone && (
                       <div className="space-y-4">
+                        {current.answer_type === "observe" && !awaitingNext && (
+                          <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface-variant">
+                            <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-slate-300 border-t-teal-600 dark:border-k3-outline-variant dark:border-t-k3-secondary" />
+                            <span>Checking cluster state…</span>
+                          </div>
+                        )}
+
                         {current.answer_type === "text" && (
                           <div className="rounded-xl border-2 border-teal-500/45 bg-white p-4 shadow-sm dark:border-k3-secondary dark:bg-k3-surface-container dark:shadow-none">
                             <label className="mb-2 block font-sans text-sm font-semibold tracking-normal text-teal-900 subpixel-antialiased dark:text-k3-secondary">
@@ -791,7 +856,7 @@ export default function App({ theme, setTheme }: AppProps) {
                               Next question
                               <MIcon name="arrow_forward" className="text-xl" />
                             </button>
-                          ) : (
+                          ) : current.answer_type !== "observe" ? (
                             <button
                               type="button"
                               disabled={!canSubmit || busy}
@@ -801,7 +866,7 @@ export default function App({ theme, setTheme }: AppProps) {
                               Submit answer
                               <MIcon name="arrow_forward" className="text-xl" />
                             </button>
-                          )}
+                          ) : null}
                           {hasMoreHints && (
                             <button
                               type="button"

@@ -14,6 +14,13 @@ type AnswerType string
 const (
 	AnswerText         AnswerType = "text"
 	AnswerSingleChoice AnswerType = "single_choice"
+	AnswerObserve      AnswerType = "observe"
+)
+
+// Poll interval bounds for observe questions (seconds).
+const (
+	PollIntervalMin = 3
+	PollIntervalMax = 120
 )
 
 // Step is a normalized workshop step (question or task).
@@ -28,8 +35,9 @@ type Step struct {
 	CorrectMessage    string     `json:"correct_message,omitempty"`   // question: shown after verify succeeds; optional
 	Setup             []string   `json:"-"`                           // commands, not exposed as JSON in raw form
 	Verify            string     `json:"-"`
-	Hints             []string   `json:"hints,omitempty"`
-	Run               string     `json:"-"`
+	Hints                 []string   `json:"hints,omitempty"`
+	PollIntervalSeconds   int        `json:"poll_interval_seconds,omitempty"` // observe only
+	Run                   string     `json:"-"`
 }
 
 // SidebarTab is reference markdown shown in the UI sidebar (not a progression step).

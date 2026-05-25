@@ -38,8 +38,9 @@ type rawStep struct {
 	CorrectMessage   string      `yaml:"correct_message"`
 	Setup            interface{} `yaml:"setup"`
 	Verify           string      `yaml:"verify"`
-	Hints            []string    `yaml:"hints"`
-	Run              string      `yaml:"run"`
+	Hints                []string `yaml:"hints"`
+	PollIntervalSeconds  int      `yaml:"poll_interval_seconds"`
+	Run                  string   `yaml:"run"`
 }
 
 // Parse loads workshop YAML into a Workshop.
@@ -160,12 +161,22 @@ func normalizeTask(rs rawStep, id string) (Step, error) {
 func normalizeQuestion(rs rawStep, id string) (Step, error) {
 	at := AnswerType(strings.TrimSpace(rs.AnswerType))
 	switch at {
-	case AnswerText, AnswerSingleChoice:
+	case AnswerText, AnswerSingleChoice, AnswerObserve:
 	default:
 		return Step{}, fmt.Errorf("question %s: invalid answer_type %q", id, rs.AnswerType)
 	}
 	if at == AnswerSingleChoice && len(rs.Options) == 0 {
 		return Step{}, fmt.Errorf("question %s: single_choice requires options", id)
+	}
+	if at == AnswerObserve {
+		if len(rs.Options) > 0 {
+			return Step{}, fmt.Errorf("question %s: observe must not have options", id)
+		}
+		if rs.PollIntervalSeconds < PollIntervalMin || rs.PollIntervalSeconds > PollIntervalMax {
+			return Step{}, fmt.Errorf("question %s: poll_interval_seconds must be between %d and %d", id, PollIntervalMin, PollIntervalMax)
+		}
+	} else if rs.PollIntervalSeconds != 0 {
+		return Step{}, fmt.Errorf("question %s: poll_interval_seconds is only valid for answer_type observe", id)
 	}
 	setup, err := parseSetup(rs.Setup)
 	if err != nil {
@@ -174,7 +185,7 @@ func normalizeQuestion(rs rawStep, id string) (Step, error) {
 	if strings.TrimSpace(rs.Verify) == "" {
 		return Step{}, fmt.Errorf("question %s: missing verify", id)
 	}
-	return Step{
+	st := Step{
 		ID:               id,
 		Type:             StepQuestion,
 		Title:            strings.TrimSpace(rs.Title),
@@ -186,7 +197,11 @@ func normalizeQuestion(rs rawStep, id string) (Step, error) {
 		Setup:            setup,
 		Verify:           strings.TrimSpace(rs.Verify),
 		Hints:            rs.Hints,
-	}, nil
+	}
+	if at == AnswerObserve {
+		st.PollIntervalSeconds = rs.PollIntervalSeconds
+	}
+	return st, nil
 }
 
 func parseSetup(v interface{}) ([]string, error) {

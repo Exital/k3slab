@@ -54,6 +54,7 @@ func New(labMgr *labs.Manager, hub *loghub.Hub, watcher *exposure.Watcher, clust
 	s.mux.HandleFunc("POST /api/task/run", s.handleTaskRun)
 	s.mux.HandleFunc("POST /api/question/setup", s.handleQuestionSetup)
 	s.mux.HandleFunc("POST /api/question/submit", s.handleQuestionSubmit)
+	s.mux.HandleFunc("POST /api/question/check", s.handleQuestionCheck)
 	s.mux.HandleFunc("POST /api/question/next", s.handleQuestionNext)
 	s.mux.HandleFunc("GET /api/stream/logs", s.handleLogStream)
 	s.mux.HandleFunc("GET /api/exposed", s.handleExposed)
@@ -290,6 +291,28 @@ func (s *Server) handleQuestionSubmit(w http.ResponseWriter, r *http.Request) {
 	var snap labs.WorkshopState
 	s.labMgr.WithEngine(func(eng *engine.Engine, labID, labsRoot string) {
 		ok, logs, err = eng.SubmitAnswer(ctx, body.Answer)
+		if err == nil {
+			snap = s.labMgr.WorkshopSnap(eng, labID, labsRoot)
+		}
+	})
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": ok, "logs": logs, "state": snap})
+}
+
+func (s *Server) handleQuestionCheck(w http.ResponseWriter, r *http.Request) {
+	if !s.requireClusterReady(w) {
+		return
+	}
+	ctx := r.Context()
+	var ok bool
+	var logs string
+	var err error
+	var snap labs.WorkshopState
+	s.labMgr.WithEngine(func(eng *engine.Engine, labID, labsRoot string) {
+		ok, logs, err = eng.CheckQuestion(ctx)
 		if err == nil {
 			snap = s.labMgr.WorkshopSnap(eng, labID, labsRoot)
 		}

@@ -205,10 +205,11 @@ After setup finishes, the learner submits an answer; the **`verify`** script dec
 | `type` | Yes | Must be `question`. |
 | `title` | Yes | Question heading. |
 | `description` | No | Markdown body (bold, inline code, paragraphs, etc.) shown above the answer controls. |
-| `answer_type` | Yes | Either **`text`** (free-form input) or **`single_choice`** (radio list). |
+| `answer_type` | Yes | **`text`** (free-form input), **`single_choice`** (radio list), or **`observe`** (no input — UI polls cluster state). |
 | `options` | If `single_choice` | Non-empty list of choice labels. The learner’s selection is passed to verify **verbatim** as `ANSWER` (the full string of the chosen option). |
+| `poll_interval_seconds` | If `observe` | Integer **3–120**. How often the UI runs **`verify`** automatically (seconds). |
 | `setup` | No | Commands to prepare the cluster **before** the learner can answer. Omit or use `[]` for no setup. |
-| `verify` | Yes | Shell script for **`bash -lc`**. The learner’s submission is in the environment variable **`ANSWER`**. Exit code **0** = correct (marks the question complete); non-zero = wrong (stay on this question). The learner advances with **Next question** in the UI after a correct verify. |
+| `verify` | Yes | Shell script for **`bash -lc`**. For **`text`** / **`single_choice`**, the learner’s submission is in **`ANSWER`**. For **`observe`**, only cluster/app checks (no **`ANSWER`**). Exit code **0** = correct (marks the question complete); non-zero = wrong or not ready yet. The learner advances with **Next question** in the UI after a correct verify. |
 | `hints` | No | List of strings. The UI reveals them **one at a time** when the learner clicks “Show next hint”. |
 | `incorrect_message` | No | Markdown shown when verify fails **instead of** the generic default wrong-answer panel. Omit to use the built-in copy. The panel stays until the learner dismisses it with **×**; if they submit another wrong answer after dismissing it, the panel appears again. |
 | `correct_message` | No | Markdown shown after a correct verify. Optional; omit for no extra panel (the short “Correct!” banner still appears). The panel stays until dismissed with **×** or the learner clicks **Next question**. |
@@ -229,7 +230,7 @@ All workshop shell snippets run with:
 
 - **Shell**: `bash -lc` (your YAML can use multi-line scripts, pipes, `kubectl`, `helm`, etc.).
 - **Working directory**: the active lab directory so paths like `bash scripts/foo.sh` or `kubectl apply -f manifests/app.yml` resolve next to `workshop.yml`.
-- **Environment**: Host environment plus **`KUBECONFIG`** (defaults to the in-container K3s kubeconfig) and **`HOME=/root`**. Verify also receives **`ANSWER`** set to the submitted string exactly as sent (for **`single_choice`**, that is always one of the **`options`** strings verbatim).
+- **Environment**: Host environment plus **`KUBECONFIG`** (defaults to the in-container K3s kubeconfig) and **`HOME=/root`**. Submit verify also receives **`ANSWER`** set to the submitted string exactly as sent (for **`single_choice`**, that is always one of the **`options`** strings verbatim). **`observe`** checks do not set **`ANSWER`**.
 
 The **browser terminal** starts in **`/root`** by default, or **`K3SLAB_TERMINAL_CWD`** after a lab is selected (set to that lab’s directory) so `kubectl apply -f manifests/...` paths match the workshop tree.
 
@@ -240,7 +241,8 @@ Rough guardrails: **task** and **question setup** up to about **10 minutes** eac
 ### Learner flow and progression
 
 - **Tasks** run automatically when their step becomes current; on success the next step loads immediately.
-- **Questions** run **setup** automatically once per step (when the step becomes current and setup is not yet done). The learner then answers and submits; **verify** runs on each submit until it exits 0.
+- **Questions** run **setup** automatically once per step (when the step becomes current and setup is not yet done). The learner then answers and submits (**`text`** / **`single_choice`**); **verify** runs on each submit until it exits 0.
+- **`observe`** questions run **verify** on a timer after setup (no answer field). Failed polls are silent; success shows the same **Correct!** flow as a submitted answer.
 - After a **correct** answer, the UI stays on the same question and shows **Next question** (replacing **Submit answer**). Optional **`correct_message`** / **`incorrect_message`** panels are dismissible with **×** and do not auto-hide like the brief success/failure banners at the top of the panel.
 - **Wrong answer**: the incorrect panel (custom or default) stays visible across repeated wrong submits until dismissed. If the learner dismisses it and submits wrong again, the panel reappears.
 - **Restart lab** in the UI resets workshop progress **and** cluster state (full K3s wipe). **Switching labs** from the header menu does the same cluster reset plus loads the other workshop.
@@ -311,6 +313,22 @@ tabs:
   verify: 'test "$ANSWER" = "kubectl get svc"'
 ```
 
+**Observe question** (cluster state only; completes when verify exits 0):
+
+```yaml
+- id: q-ready
+  type: question
+  title: Wait for the app
+  description: |
+    Fix the Deployment until pods are ready — this step completes automatically.
+  answer_type: observe
+  poll_interval_seconds: 5
+  correct_message: |
+    The app is healthy.
+  verify: |
+    kubectl get deploy my-app -n my-ns -o jsonpath='{.status.readyReplicas}' | grep -q '^1$'
+```
+
 A full working file ships as [lab/01-kubectl-basics/workshop.yml](lab/01-kubectl-basics/workshop.yml). Mount your own tree over **`/lab`** (see [Custom labs mount](#custom-labs-mount)) to add or edit labs without rebuilding the image.
 
 ## API (same origin as UI)
@@ -324,6 +342,7 @@ A full working file ships as [lab/01-kubectl-basics/workshop.yml](lab/01-kubectl
 - `POST /api/task/run` — run the current **task** step  
 - `POST /api/question/setup` — run **setup** for the current question  
 - `POST /api/question/submit` — JSON `{ "answer": "..." }` runs **verify** (`ANSWER` env); marks the question complete on success but does not advance  
+- `POST /api/question/check` — runs **verify** for **`observe`** questions (no `ANSWER`); same response shape as submit  
 - `POST /api/question/next` — advance to the next step after the current question was answered correctly  
 - `GET /api/stream/logs` — SSE log stream for setup/task output  
 - `GET /api/exposed` — JSON `{ "endpoints": [...] }` for NodePort / Ingress browser links  
