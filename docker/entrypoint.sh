@@ -78,7 +78,8 @@ trap cleanup SIGINT SIGTERM
 
 wait_ready
 
-export LAB_ROOT="${LAB_ROOT:-/lab/k3s}"
+export LABS_ROOT="${LABS_ROOT:-/lab}"
+export LAB_ID="${LAB_ID:-01-k3s}"
 export K3SLAB_LISTEN="${K3SLAB_LISTEN:-0.0.0.0:3010}"
 export K3SLAB_STATIC_DIR="${K3SLAB_STATIC_DIR:-/app/frontend/dist}"
 

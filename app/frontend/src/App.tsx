@@ -4,15 +4,21 @@ import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import {
   advanceQuestion,
   getLabStatus,
+  getLabs,
   getWorkshop,
+  LAST_LAB_STORAGE_KEY,
   LAB_RESTART_FAILED_MSG,
+  needsLabSelection,
   restartLab,
   runQuestionSetup,
   runTask,
+  selectLab,
   submitAnswer,
   waitForLabReady,
+  type LabCatalog,
   type WorkshopState,
 } from "./api";
+import { LabPicker, LabSwitcher } from "./LabPicker";
 import { MIcon } from "./components/MIcon";
 import { useExposedEndpoints } from "./hooks/useExposedEndpoints";
 import { useTerminalDetach } from "./hooks/useTerminalDetach";
@@ -102,8 +108,12 @@ export default function App({ theme, setTheme }: AppProps) {
   const [labRestarting, setLabRestarting] = useState(false);
   const [labRestartFailed, setLabRestartFailed] = useState<string | null>(null);
   const [sidebarView, setSidebarView] = useState<"workshop" | string>("workshop");
+  const [catalog, setCatalog] = useState<LabCatalog | null>(null);
+  const [labSwitcherOpen, setLabSwitcherOpen] = useState(false);
+  const [labSwitchMessage, setLabSwitchMessage] = useState("Restarting lab…");
   const exposedEndpoints = useExposedEndpoints();
   const { detached, detach, dock, popupBlocked } = useTerminalDetach();
+  const autoKey = useRef<string>("");
 
   const chromeBtn =
     "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-400/30 bg-slate-200/80 text-slate-700 transition hover:border-k3-secondary/50 hover:bg-white dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface-variant dark:hover:border-k3-secondary/40 dark:hover:bg-k3-surface-container-high";
@@ -111,19 +121,85 @@ export default function App({ theme, setTheme }: AppProps) {
   const refresh = useCallback(async () => {
     setVerifyOutcome("idle");
     try {
-      const s = await getWorkshop();
+      const [cat, s] = await Promise.all([getLabs(), getWorkshop()]);
+      setCatalog(cat);
       setState(s);
       setLoadErr(null);
-      return s;
+      return { cat, s };
     } catch (e) {
       setLoadErr(String(e));
       return null;
     }
   }, []);
 
+  const resetWorkshopUI = useCallback(() => {
+    setVerifyOutcome("idle");
+    setHadFailure(false);
+    setIncorrectPanelDismissed(false);
+    setCorrectPanelDismissed(false);
+    setHintCount(0);
+    setAnswer("");
+    autoKey.current = "";
+    setSidebarView("workshop");
+  }, []);
+
+  const onSelectLab = useCallback(
+    async (id: string, skipConfirm = false) => {
+      const prev = catalog?.activeId;
+      if (prev === id && state && !state.error) return;
+
+      if (
+        !skipConfirm &&
+        prev &&
+        prev !== id &&
+        !window.confirm(
+          "Switch to a different lab? The cluster will be fully reset and your progress in this lab will be lost. This may take up to a minute.",
+        )
+      ) {
+        return;
+      }
+
+      setLabSwitchMessage(prev ? "Switching lab…" : "Loading lab…");
+      setLabRestarting(true);
+      setLabRestartFailed(null);
+      setActionErr(null);
+      try {
+        const s = await selectLab(id);
+        setState(s);
+        resetWorkshopUI();
+        try {
+          localStorage.setItem(LAST_LAB_STORAGE_KEY, id);
+        } catch {
+          // ignore
+        }
+        const cat = await getLabs();
+        setCatalog(cat);
+        setLabRestarting(false);
+      } catch (e) {
+        const msg = String(e).includes("Lab restart failed")
+          ? String(e)
+          : String(e) || LAB_RESTART_FAILED_MSG;
+        setLabRestartFailed(msg);
+        setActionErr(msg);
+      }
+    },
+    [catalog?.activeId, resetWorkshopUI, state],
+  );
+
+  const initialLoadDone = useRef(false);
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (initialLoadDone.current) return;
+    initialLoadDone.current = true;
+    void (async () => {
+      const r = await refresh();
+      if (!r) return;
+      const qLab = new URLSearchParams(window.location.search).get("lab")?.trim();
+      if (qLab && r.cat.labs.some((l) => l.valid && l.id === qLab) && r.cat.activeId !== qLab) {
+        await onSelectLab(qLab, true);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -161,7 +237,6 @@ export default function App({ theme, setTheme }: AppProps) {
     return () => window.clearInterval(id);
   }, [labRestartFailed, labRestarting, refresh]);
 
-  const autoKey = useRef<string>("");
   useEffect(() => {
     if (labRestarting || !state || state.error || state.done || !state.current) return;
 
@@ -303,6 +378,8 @@ export default function App({ theme, setTheme }: AppProps) {
       setAnswer("");
       autoKey.current = "";
       setSidebarView("workshop");
+      const cat = await getLabs();
+      setCatalog(cat);
       await waitForLabReady();
       setLabRestarting(false);
     } catch (e) {
@@ -374,6 +451,12 @@ export default function App({ theme, setTheme }: AppProps) {
 
   const shell = theme === "dark" ? "dark" : "";
 
+  const pickerRequired = catalog != null && needsLabSelection(catalog, state);
+  const lastLabHint =
+    typeof localStorage !== "undefined"
+      ? localStorage.getItem(LAST_LAB_STORAGE_KEY) ?? undefined
+      : undefined;
+
   const navInactive =
     "rounded-lg px-3 py-2 text-slate-600 transition-colors hover:bg-slate-300/50 dark:text-k3-on-surface-variant dark:hover:bg-k3-surface-variant";
 
@@ -404,7 +487,7 @@ export default function App({ theme, setTheme }: AppProps) {
             <>
               <span className="h-12 w-12 animate-spin rounded-full border-2 border-slate-200 border-t-k3-primary-container dark:border-k3-outline-variant dark:border-t-k3-secondary" />
               <p className="max-w-sm text-center text-sm font-medium text-slate-700 dark:text-k3-on-surface">
-                Restarting lab… This may take up to a minute. kubectl may be unavailable briefly.
+                {labSwitchMessage} This may take up to a minute. kubectl may be unavailable briefly.
               </p>
             </>
           )}
@@ -412,15 +495,30 @@ export default function App({ theme, setTheme }: AppProps) {
       )}
       {/* Top app bar — Stitch / DESIGN.md */}
       <header className="z-50 flex h-16 shrink-0 items-center justify-between border-b border-slate-400/25 bg-[#eceef3]/95 px-5 backdrop-blur-sm dark:border-k3-outline-variant dark:bg-k3-surface dark:backdrop-blur-none">
-        <div className="flex min-w-0 items-center gap-6">
-          <span className="truncate font-display text-xl font-extrabold tracking-tight text-slate-900 dark:text-k3-primary">
-            {state?.name ?? "K3sLab"}
-          </span>
-          <nav className="hidden items-center md:flex">
-            <span className="border-b-2 border-blue-700 pb-1 font-mono text-xs font-semibold uppercase tracking-wider text-blue-900 dark:border-k3-primary dark:font-medium dark:text-k3-primary">
-              Labs
-            </span>
-          </nav>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <div className="flex min-w-0 items-center gap-6">
+            <div className="min-w-0">
+              <span className="block truncate font-display text-xl font-extrabold tracking-tight text-slate-900 dark:text-k3-primary">
+                {pickerRequired ? "K3sLab" : (state?.name ?? "K3sLab")}
+              </span>
+              {state?.labId && !pickerRequired ? (
+                <span className="font-mono text-xs text-slate-500 dark:text-k3-on-surface-variant">
+                  lab: {state.labId}
+                </span>
+              ) : null}
+            </div>
+            {catalog ? (
+              <LabSwitcher
+                catalog={catalog}
+                activeId={catalog.activeId || state?.labId}
+                open={labSwitcherOpen}
+                busy={busy || labRestarting}
+                onToggle={() => setLabSwitcherOpen((o) => !o)}
+                onClose={() => setLabSwitcherOpen(false)}
+                onSelect={(id) => void onSelectLab(id)}
+              />
+            ) : null}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           {detached && (
@@ -462,6 +560,14 @@ export default function App({ theme, setTheme }: AppProps) {
         </div>
       </header>
 
+      {pickerRequired && catalog ? (
+        <LabPicker
+          catalog={catalog}
+          highlightId={lastLabHint}
+          busy={labRestarting}
+          onSelect={(id) => void onSelectLab(id, true)}
+        />
+      ) : (
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Side nav — contextual lab (Stitch) */}
         <aside className="hidden min-h-0 w-[280px] shrink-0 flex-col border-r border-slate-400/20 bg-[#d4d9e3]/90 py-4 pl-2 pr-2 dark:border-k3-outline-variant dark:bg-k3-surface-low md:flex">
@@ -794,6 +900,7 @@ export default function App({ theme, setTheme }: AppProps) {
           )}
         </PanelGroup>
       </div>
+      )}
     </div>
   );
 }

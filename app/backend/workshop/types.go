@@ -44,6 +44,7 @@ type SidebarTab struct {
 // Workshop is the parsed workshop.yml root.
 type Workshop struct {
 	Name         string       `json:"name"`
+	Description  string       `json:"description,omitempty"`
 	Steps        []Step       `json:"steps"`
 	SidebarTabs  []SidebarTab `json:"sidebarTabs"`
 }

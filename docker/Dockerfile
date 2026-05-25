@@ -72,14 +72,15 @@ COPY docker/k3s-lifecycle.sh /usr/local/lib/k3slab/k3s-lifecycle.sh
 COPY docker/cluster-reset.sh /usr/local/bin/k3slab-cluster-reset
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /usr/local/lib/k3slab/k3s-lifecycle.sh /usr/local/bin/k3slab-cluster-reset /entrypoint.sh \
-    && mkdir -p /run/k3slab
+    && mkdir -p /run/k3slab /var/lib/k3slab
 
 COPY --from=backend-build /out/k3slab /app/k3slab
 COPY --from=frontend-build /src/frontend/dist /app/frontend/dist
-COPY lab/k3s /lab/k3s
+COPY lab /lab
 
 ENV KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-ENV LAB_ROOT=/lab/k3s
+ENV LABS_ROOT=/lab
+ENV LAB_ID=01-k3s
 ENV K3SLAB_LISTEN=0.0.0.0:3010
 ENV K3SLAB_STATIC_DIR=/app/frontend/dist
 ENV k9s_enable=false

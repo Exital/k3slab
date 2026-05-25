@@ -6,14 +6,12 @@ import (
 	"io/fs"
 	"log"
 	"os"
-	"path/filepath"
 
 	"k3slab/cluster"
-	"k3slab/engine"
 	"k3slab/exposure"
 	"k3slab/loghub"
+	"k3slab/labs"
 	"k3slab/server"
-	"k3slab/workshop"
 )
 
 //go:embed all:dist
@@ -26,28 +24,20 @@ func init() {
 }
 
 func main() {
-	lab := os.Getenv("LAB_ROOT")
-	if lab == "" {
-		lab = "/lab/k3s"
-	}
 	hub := loghub.New()
-	wp := filepath.Join(lab, "workshop.yml")
-	data, err := os.ReadFile(wp)
-	var eng *engine.Engine
-	switch {
-	case err != nil:
-		eng = engine.NewLoadError(err, lab, hub)
-	default:
-		w, err2 := workshop.Parse(data)
-		if err2 != nil {
-			eng = engine.NewLoadError(err2, lab, hub)
-		} else {
-			eng = engine.New(w, lab, hub)
-		}
-	}
 	watcher := exposure.NewWatcher(context.Background())
 	clusterMgr := cluster.NewManager()
-	srv, err := server.New(eng, hub, lab, watcher, clusterMgr)
+
+	labMgr, err := labs.NewManager(hub, clusterMgr, watcher)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if root := labMgr.ActiveLabRoot(); root != "" {
+		_ = os.Setenv("K3SLAB_TERMINAL_CWD", root)
+	}
+
+	srv, err := server.New(labMgr, hub, watcher, clusterMgr)
 	if err != nil {
 		log.Fatal(err)
 	}

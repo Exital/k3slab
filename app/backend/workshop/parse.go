@@ -9,9 +9,10 @@ import (
 )
 
 type rawWorkshop struct {
-	Name  string    `yaml:"name"`
-	Tabs  *rawTabs  `yaml:"tabs"`
-	Steps []rawStep `yaml:"steps"` // legacy: top-level steps when tabs absent
+	Name        string    `yaml:"name"`
+	Description string    `yaml:"description"`
+	Tabs        *rawTabs  `yaml:"tabs"`
+	Steps       []rawStep `yaml:"steps"` // legacy: top-level steps when tabs absent
 }
 
 type rawTabs struct {
@@ -64,7 +65,10 @@ func Parse(data []byte) (*Workshop, error) {
 		return nil, fmt.Errorf("workshop: tabs.steps (or legacy steps) must contain at least one step")
 	}
 
-	out := &Workshop{Name: strings.TrimSpace(raw.Name)}
+	out := &Workshop{
+		Name:        strings.TrimSpace(raw.Name),
+		Description: strings.TrimSpace(raw.Description),
+	}
 	for i, rs := range stepSource {
 		st, err := normalizeStep(rs, i)
 		if err != nil {

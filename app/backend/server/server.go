@@ -16,38 +16,39 @@ import (
 	"k3slab/cluster"
 	"k3slab/engine"
 	"k3slab/exposure"
+	"k3slab/labs"
 	"k3slab/loghub"
 )
 
 // Server wires HTTP handlers, static SPA, SSE, and terminal WS.
 type Server struct {
 	mux      *http.ServeMux
-	eng      *engine.Engine
+	labMgr   *labs.Manager
 	hub      *loghub.Hub
 	exposure *exposure.Watcher
 	cluster  *cluster.Manager
-	labRoot  string
 	static   fs.FS
 }
 
 // New constructs the HTTP server with routes registered.
-func New(eng *engine.Engine, hub *loghub.Hub, labRoot string, watcher *exposure.Watcher, clusterMgr *cluster.Manager) (*Server, error) {
+func New(labMgr *labs.Manager, hub *loghub.Hub, watcher *exposure.Watcher, clusterMgr *cluster.Manager) (*Server, error) {
 	staticFS, err := staticFileSystem()
 	if err != nil {
 		log.Printf("static files: %v", err)
 	}
 	s := &Server{
 		mux:      http.NewServeMux(),
-		eng:      eng,
+		labMgr:   labMgr,
 		hub:      hub,
 		exposure: watcher,
 		cluster:  clusterMgr,
-		labRoot:  labRoot,
 		static:   staticFS,
 	}
 	s.mux.HandleFunc("GET /health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/lab/status", s.handleLabStatus)
 	s.mux.HandleFunc("POST /api/lab/restart", s.handleLabRestart)
+	s.mux.HandleFunc("GET /api/labs", s.handleLabs)
+	s.mux.HandleFunc("POST /api/labs/select", s.handleLabsSelect)
 	s.mux.HandleFunc("GET /api/workshop", s.handleWorkshop)
 	s.mux.HandleFunc("POST /api/workshop/restart", s.handleWorkshopRestart)
 	s.mux.HandleFunc("POST /api/task/run", s.handleTaskRun)
@@ -60,8 +61,6 @@ func New(eng *engine.Engine, hub *loghub.Hub, labRoot string, watcher *exposure.
 	s.mux.HandleFunc("GET /api/ws/terminal", s.handleTerminalWS)
 
 	if s.static != nil {
-		// One wildcard only: registering both "GET /" and "GET /{path...}" panics on Go 1.22+ (overlapping patterns).
-		// This pattern matches "/" as well (empty remainder).
 		s.mux.Handle("GET /{path...}", s.spaFileServer())
 	}
 	return s, nil
@@ -92,8 +91,6 @@ func withLogging(next http.Handler) http.Handler {
 	})
 }
 
-// spaFileServer serves the Vite build. Missing non-asset paths fall back to index.html (client router).
-// We use ServeFileFS instead of FileServer+fallback Open to avoid "attempting to traverse a non-directory".
 func (s *Server) spaFileServer() http.Handler {
 	root := s.static
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +115,6 @@ func (s *Server) spaFileServer() http.Handler {
 			http.ServeFileFS(w, r, root, name)
 			return
 		}
-		// Bundled assets must be real files
 		if strings.HasPrefix(name, "assets/") {
 			http.NotFound(w, r)
 			return
@@ -148,14 +144,56 @@ func (s *Server) handleLabStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"cluster": s.cluster.Status(r.Context())})
 }
 
+func (s *Server) handleLabs(w http.ResponseWriter, r *http.Request) {
+	cat, err := s.labMgr.Catalog()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, cat)
+}
+
+type selectLabBody struct {
+	ID string `json:"id"`
+}
+
+func (s *Server) handleLabsSelect(w http.ResponseWriter, r *http.Request) {
+	var body selectLabBody
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	id := strings.TrimSpace(body.ID)
+	if id == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("missing id"))
+		return
+	}
+
+	state, err := s.labMgr.SelectLab(r.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, cluster.ErrResetDisabled):
+			writeErr(w, http.StatusForbidden, err)
+		case errors.Is(err, cluster.ErrAlreadyResetting):
+			writeErr(w, http.StatusConflict, err)
+		case errors.Is(err, labs.ErrLabNotFound), errors.Is(err, labs.ErrLabInvalid), errors.Is(err, labs.ErrInvalidID):
+			writeErr(w, http.StatusBadRequest, err)
+		default:
+			writeErr(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	writeJSON(w, map[string]any{"state": state})
+}
+
 func (s *Server) handleLabRestart(w http.ResponseWriter, r *http.Request) {
 	if s.cluster.IsResetting() {
 		writeErr(w, http.StatusConflict, cluster.ErrAlreadyResetting)
 		return
 	}
 
-	s.exposure.Clear()
-	if err := s.cluster.Reset(r.Context()); err != nil {
+	state, err := s.labMgr.RestartLab(r.Context())
+	if err != nil {
 		switch {
 		case errors.Is(err, cluster.ErrResetDisabled):
 			writeErr(w, http.StatusForbidden, err)
@@ -166,13 +204,7 @@ func (s *Server) handleLabRestart(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-
-	s.exposure.Sync()
-	if err := s.eng.Restart(); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, map[string]any{"state": s.eng.Snapshot()})
+	writeJSON(w, map[string]any{"state": state})
 }
 
 func (s *Server) requireClusterReady(w http.ResponseWriter) bool {
@@ -184,15 +216,16 @@ func (s *Server) requireClusterReady(w http.ResponseWriter) bool {
 }
 
 func (s *Server) handleWorkshop(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.eng.Snapshot())
+	writeJSON(w, s.labMgr.WorkshopState())
 }
 
 func (s *Server) handleWorkshopRestart(w http.ResponseWriter, r *http.Request) {
-	if err := s.eng.Restart(); err != nil {
+	state, err := s.labMgr.RestartWorkshop()
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, s.eng.Snapshot())
+	writeJSON(w, state)
 }
 
 func (s *Server) handleTaskRun(w http.ResponseWriter, r *http.Request) {
@@ -200,12 +233,20 @@ func (s *Server) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	logs, err := s.eng.RunTask(ctx)
+	var logs string
+	var err error
+	var snap labs.WorkshopState
+	s.labMgr.WithEngine(func(eng *engine.Engine, labID, labsRoot string) {
+		logs, err = eng.RunTask(ctx)
+		if err == nil {
+			snap = s.labMgr.WorkshopSnap(eng, labID, labsRoot)
+		}
+	})
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "logs": logs, "state": s.eng.Snapshot()})
+	writeJSON(w, map[string]any{"ok": true, "logs": logs, "state": snap})
 }
 
 func (s *Server) handleQuestionSetup(w http.ResponseWriter, r *http.Request) {
@@ -213,12 +254,20 @@ func (s *Server) handleQuestionSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	logs, err := s.eng.RunQuestionSetup(ctx)
+	var logs string
+	var err error
+	var snap labs.WorkshopState
+	s.labMgr.WithEngine(func(eng *engine.Engine, labID, labsRoot string) {
+		logs, err = eng.RunQuestionSetup(ctx)
+		if err == nil {
+			snap = s.labMgr.WorkshopSnap(eng, labID, labsRoot)
+		}
+	})
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, map[string]any{"ok": true, "logs": logs, "state": s.eng.Snapshot()})
+	writeJSON(w, map[string]any{"ok": true, "logs": logs, "state": snap})
 }
 
 type submitBody struct {
@@ -235,23 +284,40 @@ func (s *Server) handleQuestionSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	ok, logs, err := s.eng.SubmitAnswer(ctx, body.Answer)
+	var ok bool
+	var logs string
+	var err error
+	var snap labs.WorkshopState
+	s.labMgr.WithEngine(func(eng *engine.Engine, labID, labsRoot string) {
+		ok, logs, err = eng.SubmitAnswer(ctx, body.Answer)
+		if err == nil {
+			snap = s.labMgr.WorkshopSnap(eng, labID, labsRoot)
+		}
+	})
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, map[string]any{"ok": ok, "logs": logs, "state": s.eng.Snapshot()})
+	writeJSON(w, map[string]any{"ok": ok, "logs": logs, "state": snap})
 }
 
 func (s *Server) handleQuestionNext(w http.ResponseWriter, r *http.Request) {
 	if !s.requireClusterReady(w) {
 		return
 	}
-	if err := s.eng.AdvanceQuestion(); err != nil {
+	var err error
+	var snap labs.WorkshopState
+	s.labMgr.WithEngine(func(eng *engine.Engine, labID, labsRoot string) {
+		err = eng.AdvanceQuestion()
+		if err == nil {
+			snap = s.labMgr.WorkshopSnap(eng, labID, labsRoot)
+		}
+	})
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	writeJSON(w, map[string]any{"state": s.eng.Snapshot()})
+	writeJSON(w, map[string]any{"state": snap})
 }
 
 func (s *Server) handleExposed(w http.ResponseWriter, r *http.Request) {
@@ -345,7 +411,6 @@ var distFS func() (fs.FS, error) = func() (fs.FS, error) {
 	return nil, errors.New("no embedded dist")
 }
 
-// SetDistFS registers the embed FS factory (called from main via static.go).
 func SetDistFS(f func() (fs.FS, error)) {
 	distFS = f
 }

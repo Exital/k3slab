@@ -59,12 +59,12 @@ docker run --rm --name k3slab \
   k3slab:test
 ```
 
-**Sample manifests** (from the web terminal, paths are under `/lab/k3s`):
+**Sample manifests** (from the web terminal while the **01-k3s** lab is active; paths are relative to that lab directory):
 
 | File | What it does | Tab label (example) | Open in browser |
 |------|----------------|---------------------|-----------------|
-| [lab/k3s/manifests/demo-ingress.yml](lab/k3s/manifests/demo-ingress.yml) | nginx + Ingress on `localhost` / `/my_app` | `localhost/my_app` | `http://localhost/my_app/` |
-| [lab/k3s/manifests/demo-nodeport.yml](lab/k3s/manifests/demo-nodeport.yml) | nginx + NodePort **30010** | `web:30010` | `http://127.0.0.1:30010/` (with origin above) |
+| [lab/01-k3s/manifests/demo-ingress.yml](lab/01-k3s/manifests/demo-ingress.yml) | nginx + Ingress on `localhost` / `/my_app` | `localhost/my_app` | `http://localhost/my_app/` |
+| [lab/01-k3s/manifests/demo-nodeport.yml](lab/01-k3s/manifests/demo-nodeport.yml) | nginx + NodePort **30010** | `web:30010` | `http://127.0.0.1:30010/` (with origin above) |
 
 ```bash
 kubectl apply -f manifests/demo-ingress.yml
@@ -91,7 +91,9 @@ The UI shows the backend **`label`**; the click opens **`url`** (also shown on h
 - **`K3SLAB_INGRESS_HTTP_PORT`** / **`K3SLAB_INGRESS_HTTPS_PORT`** (optional): defaults **80** / **443** for Ingress URLs if you customized Traefik.
 - **`k9s_enable`** (optional): default **`false`**. Set to **`true`** (or `1` / `yes`) to put the pre-installed **k9s** binary on `PATH`. The image bundles k9s at `/usr/local/lib/k3slab/k9s`; the entrypoint symlinks it to `/usr/local/bin/k9s` only when enabled.
 - **`K3SLAB_DEBUG`** (optional): set to **`true`** (or `1` / `yes`) to log exposure watcher sync/resync messages (`exposure: synced …`, `exposure: periodic resync …`). Off by default so routine logs stay quiet.
-- **`K3SLAB_ALLOW_CLUSTER_RESET`** (optional): default **`true`**. Set to **`false`** (or `0` / `no`) to disable **Restart lab** (`POST /api/lab/restart`).
+- **`K3SLAB_ALLOW_CLUSTER_RESET`** (optional): default **`true`**. Set to **`false`** (or `0` / `no`) to disable **Restart lab** and **lab switching** (`POST /api/lab/restart`, `POST /api/labs/select`).
+- **`LABS_ROOT`** (optional): parent directory of lab subfolders; default **`/lab`**.
+- **`LAB_ID`** (optional): active lab folder name on startup (e.g. **`01-k3s`**); default **`01-k3s`** in the image.
 
 #### Troubleshooting tabs
 
@@ -114,18 +116,26 @@ docker run --rm --name k3slab \
 
 Pin the bundled k9s version at build time: `docker build --build-arg K9S_VERSION=v0.50.18 -f docker/Dockerfile -t k3slab:latest .` (default `v0.50.18`). Supported platforms: **linux/amd64** and **linux/arm64** (same as the K3s binary).
 
-### Custom lab mount
+### Custom labs mount
 
-Mount your own workshop at `/lab/k3s` (must include `workshop.yml`):
+Labs live under **`LABS_ROOT`** (default **`/lab`**). Each **immediate subdirectory** with a `workshop.yml` is one lab (e.g. `lab/01-k3s`, `lab/02-demo`). The UI lists all labs and lets learners switch (switching resets the cluster).
+
+#### Lab order in the picker and menu
+
+The catalog is sorted **alphabetically by folder name** (the lab `id`). To control display order, prefix directory names with numbers, e.g. **`01-kubernetes-basics`**, **`02-networking`**, **`03-demo`**. The shipped labs use **`01-k3s`** and **`02-demo`** so the main workshop appears first.
+
+Mount your own lab tree:
 
 ```bash
 docker run --rm --name k3slab \
   --privileged \
   --cgroupns=host \
   -p 3010:3010 \
-  -v "$(pwd)/my-lab:/lab/k3s" \
+  -v "$(pwd)/lab:/lab" \
   k3slab:latest
 ```
+
+A single custom lab: create `01-my-course/workshop.yml` and mount the parent directory to `/lab` (the lab id is the folder name, `01-my-course`). Optionally set **`-e LAB_ID=01-my-course`** to start on that lab without using the picker.
 
 ### Quick checks
 
@@ -164,19 +174,20 @@ If reset fails, restart the container (`docker run …` again) for a clean slate
 | [docker/k3s-lifecycle.sh](docker/k3s-lifecycle.sh) | Shared K3s start/stop/wait/reset helpers (entrypoint + API reset) |
 | [docker/cluster-reset.sh](docker/cluster-reset.sh) | Cluster wipe script invoked by `POST /api/lab/restart` |
 | [app/backend](app/backend) | Go API: workshop engine, exposure watcher, SSE logs, PTY WebSocket terminal |
-| [lab/k3s/manifests](lab/k3s/manifests) | Sample manifests (workshop + demo Ingress / NodePort) |
+| [lab/01-k3s/manifests](lab/01-k3s/manifests) | Sample manifests (workshop + demo Ingress / NodePort) |
 | [app/frontend](app/frontend) | Vite + React + Tailwind + xterm.js |
-| [lab/k3s](lab/k3s) | Default baked-in workshop (`workshop.yml`, scripts, manifests) |
+| [lab](lab) | Baked-in labs tree (`01-k3s/`, `02-demo/`, each with `workshop.yml`) |
 
 ## Writing workshops (`workshop.yml`)
 
-The UI loads **`workshop.yml`** from the lab directory (default **`/lab/k3s`** in the image, or your mount path). The workshop defines a linear sequence of **`tabs.steps`** (tasks and questions) plus optional **`tabs.markdowns`** panels shown in the sidebar.
+The UI loads **`workshop.yml`** from the active lab directory under **`LABS_ROOT`** (default **`/lab/<lab-id>`**, shipped as **`01-k3s`**). The workshop defines a linear sequence of **`tabs.steps`** (tasks and questions) plus optional **`tabs.markdowns`** panels shown in the sidebar.
 
 ### Top-level fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | Yes | Workshop title shown in the UI header. |
+| `description` | No | Short blurb for the lab picker (not shown during steps). |
 | `tabs` | Yes* | Object with `steps` (progression) and optional `markdowns` (sidebar). |
 | `steps` | Yes* | **Legacy only:** top-level list of task/question steps if `tabs` is not used. Do not combine with `tabs.steps`. |
 
@@ -251,17 +262,17 @@ After setup finishes, the learner submits an answer; the **`verify`** script dec
 - A **single string** — one command (equivalent to a one-element list).
 - A **list of strings** — commands run **in order**; the first failure stops setup and leaves the question blocked until setup succeeds (e.g. after you fix the lab and refresh).
 
-Each command is executed as **`bash -lc "<command>"`** with working directory **`LAB_ROOT`** (the lab folder containing `workshop.yml`).
+Each command is executed as **`bash -lc "<command>"`** with working directory set to the **active lab folder** (the subdirectory under **`LABS_ROOT`** that contains `workshop.yml`).
 
 ### Execution environment (for `run`, `setup`, and `verify`)
 
 All workshop shell snippets run with:
 
 - **Shell**: `bash -lc` (your YAML can use multi-line scripts, pipes, `kubectl`, `helm`, etc.).
-- **Working directory**: **`LAB_ROOT`** so paths like `bash scripts/foo.sh` or `kubectl apply -f manifests/app.yml` resolve next to `workshop.yml`.
+- **Working directory**: the active lab directory so paths like `bash scripts/foo.sh` or `kubectl apply -f manifests/app.yml` resolve next to `workshop.yml`.
 - **Environment**: Host environment plus **`KUBECONFIG`** (defaults to the in-container K3s kubeconfig) and **`HOME=/root`**. Verify also receives **`ANSWER`** set to the submitted string exactly as sent (for **`single_choice`**, that is always one of the **`options`** strings verbatim).
 
-The **browser terminal** starts in **`/root`** (not `LAB_ROOT`) so learners are not dropped straight into the lab tree; workshop commands still use `LAB_ROOT` as above.
+The **browser terminal** starts in **`/root`** by default, or **`K3SLAB_TERMINAL_CWD`** after a lab is selected (set to that lab’s directory) so `kubectl apply -f manifests/...` paths match the workshop tree.
 
 ### Timeouts (engine defaults)
 
@@ -273,7 +284,7 @@ Rough guardrails: **task** and **question setup** up to about **10 minutes** eac
 - **Questions** run **setup** automatically once per step (when the step becomes current and setup is not yet done). The learner then answers and submits; **verify** runs on each submit until it exits 0.
 - After a **correct** answer, the UI stays on the same question and shows **Next question** (replacing **Submit answer**). Optional **`correct_message`** / **`incorrect_message`** panels are dismissible with **×** and do not auto-hide like the brief success/failure banners at the top of the panel.
 - **Wrong answer**: the incorrect panel (custom or default) stays visible across repeated wrong submits until dismissed. If the learner dismisses it and submits wrong again, the panel reappears.
-- **Restart lab** in the UI resets workshop progress **and** cluster state (full K3s wipe). Use it when the learner wants a clean slate; expect ~20–60 seconds while the cluster restarts.
+- **Restart lab** in the UI resets workshop progress **and** cluster state (full K3s wipe). **Switching labs** from the header menu does the same cluster reset plus loads the other workshop.
 - Progress is **per running app instance** (single shared learner if multiple browser tabs hit the same server).
 
 ### Minimal examples
@@ -341,11 +352,13 @@ tabs:
   verify: 'test "$ANSWER" = "kubectl get svc"'
 ```
 
-A full working file ships as [lab/k3s/workshop.yml](lab/k3s/workshop.yml). Mount your own directory over **`/lab/k3s`** (see [Custom lab mount](#custom-lab-mount)) to iterate on a workshop without rebuilding the image.
+A full working file ships as [lab/01-k3s/workshop.yml](lab/01-k3s/workshop.yml). Mount your own tree over **`/lab`** (see [Custom labs mount](#custom-labs-mount)) to add or edit labs without rebuilding the image.
 
 ## API (same origin as UI)
 
-- `GET /api/workshop` — current step and metadata (includes `sidebarTabs` from `tabs.markdowns`)  
+- `GET /api/labs` — catalog of labs under `LABS_ROOT` (`labsRoot`, `activeId`, `labs[]` with `id`, `name`, `description`, `stepCount`, `valid`, `error`)  
+- `POST /api/labs/select` — JSON `{ "id": "<lab-folder>" }`; activates a lab (full cluster reset when switching to a different lab); returns `{ "state": … }`  
+- `GET /api/workshop` — current step and metadata (includes `sidebarTabs`, `labId`, `labsRoot`)  
 - `GET /api/lab/status` — `{ "cluster": "ready" | "resetting" | "unavailable" }`  
 - `POST /api/lab/restart` — reset cluster + workshop progress to step 1  
 - `POST /api/workshop/restart` — reset workshop progress only (in-memory; internal/dev; no cluster wipe)  

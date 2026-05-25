@@ -39,7 +39,42 @@ export type WorkshopState = {
   lastVerifyLogs?: string;
   lastTaskLogs?: string;
   sidebarTabs?: SidebarTab[];
+  labId?: string;
+  labsRoot?: string;
 };
+
+export type LabEntry = {
+  id: string;
+  name?: string;
+  description?: string;
+  stepCount?: number;
+  valid: boolean;
+  error?: string;
+};
+
+export type LabCatalog = {
+  labsRoot: string;
+  activeId: string;
+  labs: LabEntry[];
+};
+
+export async function getLabs(): Promise<LabCatalog> {
+  const res = await fetch("/api/labs");
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function selectLab(id: string): Promise<WorkshopState> {
+  const res = await fetch("/api/labs/select", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }),
+    signal: AbortSignal.timeout(300_000),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { error?: string }).error || res.statusText);
+  return (body as { state: WorkshopState }).state;
+}
 
 export async function getWorkshop(): Promise<WorkshopState> {
   const res = await fetch("/api/workshop");
@@ -149,4 +184,14 @@ export async function getExposed(): Promise<ExposedSnapshot> {
 
 export function exposedStreamUrl(): string {
   return "/api/stream/exposed";
+}
+
+export const LAST_LAB_STORAGE_KEY = "k3slab:lastLab";
+
+export function needsLabSelection(catalog: LabCatalog, workshop: WorkshopState | null): boolean {
+  const validCount = catalog.labs.filter((l) => l.valid).length;
+  if (validCount === 0) return false;
+  if (validCount === 1) return false;
+  if (workshop?.error?.toLowerCase().includes("select a lab")) return true;
+  return !catalog.activeId;
 }

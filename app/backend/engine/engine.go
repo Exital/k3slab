@@ -58,6 +58,11 @@ func NewLoadError(err error, labRoot string, hub *loghub.Hub) *Engine {
 	return &Engine{loadErr: err, labRoot: labRoot, hub: hub}
 }
 
+// LabRoot is the directory used as cwd for workshop shell commands.
+func (e *Engine) LabRoot() string {
+	return e.labRoot
+}
+
 func (e *Engine) kubeEnv() []string {
 	return kube.Env()
 }

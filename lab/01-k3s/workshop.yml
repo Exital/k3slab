@@ -1,4 +1,5 @@
 name: Kubernetes Basics
+description: Learn kubectl basics with a broken pod and service discovery questions.
 
 tabs:
   steps:
@@ -60,4 +61,4 @@ tabs:
       content: |
         This lab runs **K3s** inside the container. Use the web terminal with `kubectl` against the local cluster.
 
-        Workshop files live under **`LAB_ROOT`** (the mounted lab directory containing `workshop.yml`).
+        Labs live under **`LABS_ROOT`** (default `/lab`). Each lab is a subdirectory with its own `workshop.yml` (this lab is **`01-k3s`**).
