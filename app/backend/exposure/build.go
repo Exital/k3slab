@@ -96,17 +96,15 @@ func buildEndpoints(services map[string]json.RawMessage, ingresses map[string]js
 			tls := hostHasTLS(host, ing.Spec.TLS)
 			for _, path := range paths {
 				httpID := ingressID(ns, name, host, path, "http")
-				label := host
-				if path != "/" {
-					label = host + path
-				}
+				visitPath := browserIngressPath(path)
+				label := ingressLabel(host, visitPath)
 				out = append(out, Endpoint{
 					ID:        httpID,
 					Kind:      "ingress",
 					Namespace: ns,
 					Name:      name,
 					Label:     label,
-					URL:       formatURL("http", host, httpPort, path),
+					URL:       formatURL("http", host, httpPort, visitPath),
 					Port:      httpPort,
 				})
 				if tls {
@@ -116,7 +114,7 @@ func buildEndpoints(services map[string]json.RawMessage, ingresses map[string]js
 						Namespace: ns,
 						Name:      name,
 						Label:     label + " (https)",
-						URL:       formatURL("https", host, httpsPort, path),
+						URL:       formatURL("https", host, httpsPort, visitPath),
 						Port:      httpsPort,
 					})
 				}
@@ -149,6 +147,29 @@ func buildEndpoints(services map[string]json.RawMessage, ingresses map[string]js
 func ingressID(ns, name, host, path, scheme string) string {
 	p := strings.TrimPrefix(path, "/")
 	return "ingress/" + ns + "/" + name + "/" + scheme + "/" + host + "/" + p
+}
+
+// browserIngressPath turns an Ingress spec path (including regex paths used with
+// nginx rewrite) into a URL path suitable for opening in a browser.
+func browserIngressPath(path string) string {
+	if path == "" || path == "/" {
+		return "/"
+	}
+	if i := strings.Index(path, "("); i > 0 {
+		path = path[:i]
+	}
+	path = strings.TrimSuffix(path, "/")
+	if path == "" {
+		return "/"
+	}
+	return path + "/"
+}
+
+func ingressLabel(host, visitPath string) string {
+	if visitPath == "/" {
+		return host
+	}
+	return host + strings.TrimSuffix(visitPath, "/")
 }
 
 func hostHasTLS(host string, tlsBlocks []struct {
