@@ -15,8 +15,8 @@ COPY --from=frontend-build /src/frontend/dist ./dist
 ENV CGO_ENABLED=1 GOOS=linux
 RUN go mod tidy && go build -trimpath -ldflags="-s -w" -o /out/k3slab .
 
-# --- Runtime ---
-FROM ubuntu:24.04
+# --- Shared runtime base (prod + dev) ---
+FROM ubuntu:24.04 AS k3s-base
 
 ARG K3S_VERSION=v1.31.5+k3s1
 
@@ -72,24 +72,42 @@ COPY docker/k3s-lifecycle.sh /usr/local/lib/k3slab/k3s-lifecycle.sh
 COPY docker/terminal-bashrc.sh /usr/local/lib/k3slab/terminal-bashrc.sh
 COPY docker/profile.d-k3slab-terminal.sh /etc/profile.d/k3slab-terminal.sh
 COPY docker/cluster-reset.sh /usr/local/bin/k3slab-cluster-reset
+COPY docker/dev-entrypoint.sh /usr/local/bin/k3slab-dev-entrypoint
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /usr/local/lib/k3slab/k3s-lifecycle.sh /usr/local/bin/k3slab-cluster-reset /entrypoint.sh \
+RUN chmod +x /usr/local/lib/k3slab/k3s-lifecycle.sh /usr/local/bin/k3slab-cluster-reset /usr/local/bin/k3slab-dev-entrypoint /entrypoint.sh \
     && mkdir -p /run/k3slab /var/lib/k3slab \
     && touch /root/.bashrc \
     && ( grep -q 'terminal-bashrc.sh' /root/.bashrc 2>/dev/null || \
       { printf '%s\n' '# k3slab terminal prompt' '[ -f /usr/local/lib/k3slab/terminal-bashrc.sh ] && . /usr/local/lib/k3slab/terminal-bashrc.sh' '' | cat - /root/.bashrc > /tmp/k3slab-bashrc && mv /tmp/k3slab-bashrc /root/.bashrc; } )
 
+# --- Dev runtime image: same base + hot-reload tooling ---
+FROM k3s-base AS dev-runtime
+ARG AIR_VERSION=v1.52.3
+COPY --from=golang:1.23-bookworm /usr/local/go /usr/local/go
+RUN ln -sf /usr/local/go/bin/go /usr/local/bin/go \
+    && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+ENV PATH=/usr/local/go/bin:/go/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/sbin:/bin
+RUN GOBIN=/usr/local/bin /usr/local/go/bin/go install github.com/air-verse/air@${AIR_VERSION}
+WORKDIR /workspace
+ENV KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+ENV LABS_ROOT=/workspace/lab
+ENV LAB_ID=01-kubectl-basics
+ENV K3SLAB_LISTEN=0.0.0.0:3010
+ENV K3SLAB_STATIC_DIR=/workspace/app/backend/dist
+ENV K3SLAB_CLUSTER_PROFILE=/run/k3slab/cluster-profile.env
+EXPOSE 3010
+ENTRYPOINT ["/usr/local/bin/k3slab-dev-entrypoint"]
+
+# --- Production runtime image (default target) ---
+FROM k3s-base AS runtime
 COPY --from=backend-build /out/k3slab /app/k3slab
 COPY --from=frontend-build /src/frontend/dist /app/frontend/dist
 COPY lab /lab
-
 ENV KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 ENV LABS_ROOT=/lab
 ENV LAB_ID=01-kubectl-basics
 ENV K3SLAB_LISTEN=0.0.0.0:3010
 ENV K3SLAB_STATIC_DIR=/app/frontend/dist
 ENV k9s_enable=false
-
 EXPOSE 3010
-
 ENTRYPOINT ["/entrypoint.sh"]

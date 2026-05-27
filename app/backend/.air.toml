@@ -1,0 +1,16 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/k3slab-dev ."
+bin = "./tmp/k3slab-dev"
+full_bin = "./tmp/k3slab-dev"
+include_ext = ["go", "tpl", "tmpl", "html", "yaml", "yml"]
+exclude_dir = ["tmp", "vendor"]
+delay = 700
+stop_on_error = true
+send_interrupt = true
+kill_delay = 500
+
+[log]
+time = true
