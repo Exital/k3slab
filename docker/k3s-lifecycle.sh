@@ -7,16 +7,32 @@
 : "${K3SLAB_K3S_LOG_FILE:=/var/log/k3s-server.log}"
 : "${K3SLAB_K3S_SNAPSHOTTER:=native}"
 : "${K3SLAB_K3S_READY_TIMEOUT:=300}"
+: "${K3SLAB_DISABLE_TRAEFIK:=false}"
+
+k3slab_true() {
+  case "${1,,}" in
+    true|1|yes)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
 
 k3slab_k3s_server_args() {
-  echo \
+  local args=(
     --write-kubeconfig-mode 644 \
     --bind-address 0.0.0.0 \
     --https-listen-port 6443 \
     --disable-network-policy \
     --disable=metrics-server \
-    --disable=traefik \
     --snapshotter="${K3SLAB_K3S_SNAPSHOTTER}"
+  )
+  if k3slab_true "${K3SLAB_DISABLE_TRAEFIK}"; then
+    args+=(--disable=traefik)
+  fi
+  printf '%s ' "${args[@]}"
 }
 
 # ingress-nginx with hostNetwork so http://localhost works inside Docker (-p 80:80).
