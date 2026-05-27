@@ -35,6 +35,21 @@ const DEFAULT_WRONG_ANSWER_MSG =
   "That doesn't match what we expected. Double-check your answer or the cluster state, then try again.";
 
 type VerifyOutcome = "idle" | "success" | "failure";
+const CLUSTER_STATUS_STORAGE_KEY = "k3slab:lastClusterStatus";
+const CLUSTER_STATUS_VALUES: readonly LabStatus["cluster"][] = ["ready", "resetting", "unavailable"];
+
+function readStoredClusterStatus(): LabStatus["cluster"] | null {
+  try {
+    const raw = localStorage.getItem(CLUSTER_STATUS_STORAGE_KEY);
+    if (!raw) return null;
+    if ((CLUSTER_STATUS_VALUES as readonly string[]).includes(raw)) {
+      return raw as LabStatus["cluster"];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 function DismissibleMessagePanel({
   variant,
@@ -91,14 +106,20 @@ function DismissibleMessagePanel({
   );
 }
 
-function ClusterStatusBadge({
-  ready,
-  status,
-}: {
-  ready: boolean;
-  status: LabStatus["cluster"];
-}) {
-  if (ready) {
+function ClusterStatusBadge({ status }: { status: LabStatus["cluster"] | null }) {
+  if (status === null) {
+    return (
+      <span
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-slate-300/70 bg-slate-100 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-slate-600 dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface-variant"
+        role="status"
+        aria-live="polite"
+      >
+        <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-slate-400 dark:bg-k3-outline" />
+        Checking cluster
+      </span>
+    );
+  }
+  if (status === "ready") {
     return (
       <span
         className="inline-flex shrink-0 items-center rounded-full border border-emerald-300/70 bg-emerald-100 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200"
@@ -109,14 +130,24 @@ function ClusterStatusBadge({
       </span>
     );
   }
-  const label = status === "resetting" ? "Cluster restarting" : "Cluster not ready";
+  if (status === "resetting") {
+    return (
+      <span
+        className="inline-flex shrink-0 items-center rounded-full border border-amber-300/70 bg-amber-100 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-amber-900 dark:border-amber-400/35 dark:bg-amber-500/15 dark:text-amber-100"
+        role="status"
+        aria-live="polite"
+      >
+        Cluster restarting
+      </span>
+    );
+  }
   return (
     <span
       className="inline-flex shrink-0 items-center rounded-full border border-rose-300/70 bg-rose-100 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-rose-800 dark:border-rose-500/35 dark:bg-rose-500/15 dark:text-rose-200"
       role="status"
       aria-live="polite"
     >
-      {label}
+      Cluster not ready
     </span>
   );
 }
@@ -143,7 +174,7 @@ export default function App({ theme, setTheme }: AppProps) {
   const [catalog, setCatalog] = useState<LabCatalog | null>(null);
   const [labSwitcherOpen, setLabSwitcherOpen] = useState(false);
   const [labSwitchMessage, setLabSwitchMessage] = useState("Restarting lab…");
-  const [clusterStatus, setClusterStatus] = useState<LabStatus["cluster"]>("unavailable");
+  const [clusterStatus, setClusterStatus] = useState<LabStatus["cluster"] | null>(() => readStoredClusterStatus());
   const clusterReady = clusterStatus === "ready";
   const exposedEndpoints = useExposedEndpoints();
   const { detached, detach, dock, popupBlocked } = useTerminalDetach();
@@ -154,19 +185,33 @@ export default function App({ theme, setTheme }: AppProps) {
   const chromeBtn =
     "flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-400/30 bg-slate-200/80 text-slate-700 transition hover:border-k3-secondary/50 hover:bg-white dark:border-k3-outline-variant dark:bg-k3-surface-container dark:text-k3-on-surface-variant dark:hover:border-k3-secondary/40 dark:hover:bg-k3-surface-container-high";
 
+  const updateClusterStatus = useCallback((status: LabStatus["cluster"]) => {
+    setClusterStatus(status);
+    try {
+      localStorage.setItem(CLUSTER_STATUS_STORAGE_KEY, status);
+    } catch {
+      // ignore storage failures
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     setVerifyOutcome("idle");
     try {
-      const [cat, s] = await Promise.all([getLabs(), getWorkshop()]);
+      const [cat, s, labStatus] = await Promise.all([
+        getLabs(),
+        getWorkshop(),
+        getLabStatus().catch(() => null),
+      ]);
       setCatalog(cat);
       setState(s);
       setLoadErr(null);
+      if (labStatus) updateClusterStatus(labStatus.cluster);
       return { cat, s };
     } catch (e) {
       setLoadErr(String(e));
       return null;
     }
-  }, []);
+  }, [updateClusterStatus]);
 
   const resetWorkshopUI = useCallback(() => {
     setVerifyOutcome("idle");
@@ -243,7 +288,7 @@ export default function App({ theme, setTheme }: AppProps) {
       try {
         const status = await getLabStatus();
         if (closed) return;
-        setClusterStatus(status.cluster);
+        updateClusterStatus(status.cluster);
         if (status.cluster === "resetting") {
           setLabRestarting(true);
           return;
@@ -253,7 +298,7 @@ export default function App({ theme, setTheme }: AppProps) {
           await refresh();
         }
       } catch {
-        // ignore status probe errors while server starts
+        // Keep last known status on transient errors (avoid flashing "not ready" on refresh).
       }
     };
     void pollStatus();
@@ -264,7 +309,7 @@ export default function App({ theme, setTheme }: AppProps) {
       closed = true;
       window.clearInterval(id);
     };
-  }, [labRestartFailed, labRestarting, refresh]);
+  }, [labRestartFailed, labRestarting, refresh, updateClusterStatus]);
 
   useEffect(() => {
     if (labRestarting || !clusterReady || !state || state.error || state.done || !state.current) return;
@@ -952,7 +997,7 @@ export default function App({ theme, setTheme }: AppProps) {
                     <div className="h-3 w-3 rounded-full bg-emerald-500/50" />
                   </div>
                   <div className="hidden h-6 w-px bg-slate-300 sm:block dark:bg-k3-outline-variant" />
-                  <ClusterStatusBadge ready={clusterReady} status={clusterStatus} />
+                  <ClusterStatusBadge status={clusterStatus} />
                 </div>
                 <div className="flex min-w-0 flex-1 items-center justify-end gap-2 overflow-x-auto">
                   <button
