@@ -7,11 +7,16 @@ tabs:
       type: question
       title: Deploy the lab manifests
       description: |
+        A background setup task is starting now to install **ingress-nginx** for this lab. You can continue with the deployment tasks while it is provisioning.
+
         Deploy the lab stack from the **`manifests/`** directory in this lab folder using **`kubectl apply`** (you choose flags such as `-f` and the path — the full command is not given here).
 
         This step completes automatically once the namespace and workloads are present in the cluster.
       answer_type: observe
       poll_interval_seconds: 5
+      setup:
+        - run: bash scripts/setup.sh
+          background: true
       correct_message: |
         Lab manifests are applied in namespace **`deployment-basics`**.
       verify: |
@@ -24,7 +29,7 @@ tabs:
         - "From the lab directory: `kubectl apply -f manifests/` (not `manifests/*` — use the directory path)"
         - "If some objects failed with **namespace not found**, run `kubectl apply -f manifests/` again (namespace is applied first via `00-namespace.yml`)"
         - "`kubectl get deploy,svc,ingress -n deployment-basics`"
-        - "Ingress uses class **`nginx`** (installed by k3slab instead of Traefik)"
+        - "Ingress uses class **`nginx`**; the lab starts ingress-nginx setup in the background, so wait until controller pods are ready if ingress checks fail early"
 
     - id: question-image-tag
       type: question

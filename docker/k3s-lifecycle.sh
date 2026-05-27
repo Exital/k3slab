@@ -35,26 +35,6 @@ k3slab_k3s_server_args() {
   printf '%s ' "${args[@]}"
 }
 
-# ingress-nginx with hostNetwork so http://localhost works inside Docker (-p 80:80).
-install_ingress_nginx() {
-  if kubectl get deploy -n ingress-nginx ingress-nginx-controller &>/dev/null 2>&1; then
-    return 0
-  fi
-  echo "[k3slab] Installing ingress-nginx (Traefik is disabled)..."
-  helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx >/dev/null 2>&1 || true
-  helm repo update ingress-nginx >/dev/null 2>&1 || true
-  helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
-    --namespace ingress-nginx --create-namespace \
-    --wait --timeout 10m \
-    --set controller.hostNetwork=true \
-    --set controller.dnsPolicy=ClusterFirstWithHostNet \
-    --set controller.service.type=ClusterIP \
-    --set controller.ingressClassResource.name=nginx \
-    --set controller.ingressClassResource.default=true \
-    --set controller.admissionWebhooks.enabled=false \
-    --set controller.watchIngressWithoutClass=true
-}
-
 start_k3s() {
   mkdir -p "$(dirname "${K3SLAB_K3S_LOG_FILE}")" "$(dirname "${K3SLAB_PID_FILE}")"
   : > "${K3SLAB_K3S_LOG_FILE}"
@@ -140,7 +120,6 @@ wait_ready() {
   while true; do
     if kubectl get nodes 2>/dev/null | grep -q '\sReady\s'; then
       echo "[k3slab] Cluster is Ready."
-      install_ingress_nginx
       return 0
     fi
     now_ts=$(date +%s)
