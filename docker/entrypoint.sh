@@ -24,6 +24,9 @@ export K3SLAB_K3S_LOG_BACKUPS="${K3SLAB_K3S_LOG_BACKUPS:-3}"
 # shellcheck source=/dev/null
 source /usr/local/lib/k3slab/k3s-lifecycle.sh
 
+export LABS_ROOT="${LABS_ROOT:-/lab}"
+export LAB_ID="${LAB_ID:-01-kubectl-basics}"
+
 rotate_k3s_log_if_needed() {
   [[ -f "${K3SLAB_K3S_LOG_FILE}" ]] || return 0
   local size
@@ -59,6 +62,7 @@ echo "[k3slab] Starting K3s server..."
 # Inside Docker, nested overlay often fails ("overlayfs snapshotter cannot be enabled...
 # try fuse-overlayfs or native"). Native snapshotter is slower but reliable for local labs.
 : "${K3SLAB_K3S_SNAPSHOTTER:=native}"
+/app/k3slab apply-cluster-profile "${LABS_ROOT}" "${LAB_ID}"
 K3S_PID=$(start_k3s)
 start_k3s_log_rotator
 
@@ -80,8 +84,6 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
-export LABS_ROOT="${LABS_ROOT:-/lab}"
-export LAB_ID="${LAB_ID:-01-kubectl-basics}"
 export K3SLAB_LISTEN="${K3SLAB_LISTEN:-0.0.0.0:3010}"
 export K3SLAB_STATIC_DIR="${K3SLAB_STATIC_DIR:-/app/frontend/dist}"
 

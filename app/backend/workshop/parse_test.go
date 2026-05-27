@@ -174,6 +174,48 @@ tabs:
 	}
 }
 
+func TestParseClusterDisableTraefik(t *testing.T) {
+	yaml := `
+name: Test
+cluster:
+  disable_traefik: true
+tabs:
+  steps:
+    - id: q1
+      type: question
+      title: Q
+      answer_type: text
+      verify: 'true'
+`
+	w, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !w.Cluster.DisableTraefik {
+		t.Fatal("expected disable_traefik true")
+	}
+}
+
+func TestParseClusterDefaultTraefikOn(t *testing.T) {
+	yaml := `
+name: Test
+tabs:
+  steps:
+    - id: q1
+      type: question
+      title: Q
+      answer_type: text
+      verify: 'true'
+`
+	w, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Cluster.DisableTraefik {
+		t.Fatal("expected disable_traefik false by default")
+	}
+}
+
 func TestParseSetupBackgroundInvalidType(t *testing.T) {
 	yaml := `
 name: Test

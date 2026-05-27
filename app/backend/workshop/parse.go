@@ -9,10 +9,15 @@ import (
 )
 
 type rawWorkshop struct {
-	Name        string    `yaml:"name"`
-	Description string    `yaml:"description"`
-	Tabs        *rawTabs  `yaml:"tabs"`
-	Steps       []rawStep `yaml:"steps"` // legacy: top-level steps when tabs absent
+	Name        string      `yaml:"name"`
+	Description string      `yaml:"description"`
+	Cluster     *rawCluster `yaml:"cluster"`
+	Tabs        *rawTabs    `yaml:"tabs"`
+	Steps       []rawStep   `yaml:"steps"` // legacy: top-level steps when tabs absent
+}
+
+type rawCluster struct {
+	DisableTraefik *bool `yaml:"disable_traefik"`
 }
 
 type rawTabs struct {
@@ -69,6 +74,7 @@ func Parse(data []byte) (*Workshop, error) {
 	out := &Workshop{
 		Name:        strings.TrimSpace(raw.Name),
 		Description: strings.TrimSpace(raw.Description),
+		Cluster:     normalizeCluster(raw.Cluster),
 	}
 	for i, rs := range stepSource {
 		st, err := normalizeStep(rs, i)
@@ -89,6 +95,13 @@ func Parse(data []byte) (*Workshop, error) {
 	}
 
 	return out, nil
+}
+
+func normalizeCluster(rc *rawCluster) ClusterConfig {
+	if rc == nil || rc.DisableTraefik == nil {
+		return ClusterConfig{}
+	}
+	return ClusterConfig{DisableTraefik: *rc.DisableTraefik}
 }
 
 func normalizeMarkdown(rm rawMarkdown, idx int) (SidebarTab, error) {

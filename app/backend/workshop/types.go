@@ -55,10 +55,18 @@ type SidebarTab struct {
 	Icon    string `json:"icon,omitempty"`
 }
 
+// ClusterConfig controls K3s server flags for a lab (applied on cluster start/reset).
+type ClusterConfig struct {
+	// DisableTraefik when true starts K3s with --disable=traefik (Traefik off).
+	// When false or unset, K3s keeps the bundled Traefik ingress controller enabled.
+	DisableTraefik bool `json:"disable_traefik,omitempty"`
+}
+
 // Workshop is the parsed workshop.yml root.
 type Workshop struct {
 	Name         string       `json:"name"`
 	Description  string       `json:"description,omitempty"`
+	Cluster      ClusterConfig `json:"cluster,omitempty"`
 	Steps        []Step       `json:"steps"`
 	SidebarTabs  []SidebarTab `json:"sidebarTabs"`
 }

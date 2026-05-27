@@ -24,6 +24,16 @@ func init() {
 }
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "apply-cluster-profile" {
+		if len(os.Args) != 4 {
+			log.Fatal("usage: k3slab apply-cluster-profile <labsRoot> <labId>")
+		}
+		if err := labs.WriteClusterProfile(os.Args[2], os.Args[3]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	hub := loghub.New()
 	watcher := exposure.NewWatcher(context.Background())
 	clusterMgr := cluster.NewManager()

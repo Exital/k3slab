@@ -1,6 +1,9 @@
 name: Deployment Basics
 description: Troubleshoot the simple-ctf Deployment, Service, and Ingress, then capture the flag at /ctf.
 
+cluster:
+  disable_traefik: true
+
 tabs:
   steps:
     - id: question-deploy-manifests

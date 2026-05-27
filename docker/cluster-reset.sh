@@ -7,4 +7,5 @@ export PATH="/usr/local/bin:/usr/local/sbin:/usr/bin:/sbin:/bin:${PATH}"
 # shellcheck source=/dev/null
 source /usr/local/lib/k3slab/k3s-lifecycle.sh
 
+k3slab_load_cluster_profile
 reset_cluster

@@ -7,7 +7,15 @@
 : "${K3SLAB_K3S_LOG_FILE:=/var/log/k3s-server.log}"
 : "${K3SLAB_K3S_SNAPSHOTTER:=native}"
 : "${K3SLAB_K3S_READY_TIMEOUT:=300}"
-: "${K3SLAB_DISABLE_TRAEFIK:=false}"
+: "${K3SLAB_CLUSTER_PROFILE:=/run/k3slab/cluster-profile.env}"
+
+k3slab_load_cluster_profile() {
+  K3SLAB_DISABLE_TRAEFIK=false
+  if [[ -f "${K3SLAB_CLUSTER_PROFILE}" ]]; then
+    # shellcheck source=/dev/null
+    source "${K3SLAB_CLUSTER_PROFILE}"
+  fi
+}
 
 k3slab_true() {
   case "${1,,}" in
@@ -21,6 +29,7 @@ k3slab_true() {
 }
 
 k3slab_k3s_server_args() {
+  k3slab_load_cluster_profile
   local args=(
     --write-kubeconfig-mode 644 \
     --bind-address 0.0.0.0 \

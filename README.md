@@ -54,7 +54,6 @@ For other Ingress or NodePort workloads, publish the matching ports and set **`K
 
 - **`K3SLAB_PUBLIC_ORIGIN`** (optional): scheme + host for **NodePort** links. Default `http://localhost`.
 - **`K3SLAB_INGRESS_HTTP_PORT`** / **`K3SLAB_INGRESS_HTTPS_PORT`** (optional): defaults **80** / **443** for Ingress URLs if you customized the ingress controller.
-- **`K3SLAB_DISABLE_TRAEFIK`** (optional): default **`false`**. Set to **`true`** (or `1` / `yes`) to start K3s with `--disable=traefik`.
 - **`k9s_enable`** (optional): default **`false`**. Set to **`true`** (or `1` / `yes`) to put the pre-installed **k9s** binary on `PATH`. The image bundles k9s at `/usr/local/lib/k3slab/k9s`; the entrypoint symlinks it to `/usr/local/bin/k9s` only when enabled.
 - **`K3SLAB_DEBUG`** (optional): set to **`true`** (or `1` / `yes`) to log exposure watcher sync/resync messages (`exposure: synced …`, `exposure: periodic resync …`). Off by default so routine logs stay quiet.
 - **`K3SLAB_ALLOW_CLUSTER_RESET`** (optional): default **`true`**. Set to **`false`** (or `0` / `no`) to disable **Restart lab** and **lab switching** (`POST /api/lab/restart`, `POST /api/labs/select`).
@@ -148,10 +147,34 @@ The UI loads **`workshop.yml`** from the active lab directory under **`LABS_ROOT
 |-------|----------|-------------|
 | `name` | Yes | Workshop title shown in the UI header. |
 | `description` | No | Short blurb for the lab picker (not shown during steps). |
+| `cluster` | No | Per-lab K3s cluster options (see below). Applied when the container starts and whenever a lab is selected or restarted. |
 | `tabs` | Yes* | Object with `steps` (progression) and optional `markdowns` (sidebar). |
 | `steps` | Yes* | **Legacy only:** top-level list of task/question steps if `tabs` is not used. Do not combine with `tabs.steps`. |
 
 \*Provide either **`tabs.steps`** (preferred) or legacy **`steps`**, non-empty.
+
+### `cluster` (per-lab K3s options)
+
+Optional block at the top of **`workshop.yml`**. Controls whether K3s starts with the bundled **Traefik** ingress controller. When you switch labs or use **Restart lab**, the cluster is wiped and K3s is started again using the **active lab’s** `cluster` settings.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `disable_traefik` | `false` | When **`true`**, K3s starts with `--disable=traefik`. When **`false`** or omitted, **Traefik stays enabled** (normal K3s default). |
+
+Example for a lab that installs **ingress-nginx** in setup instead of using Traefik:
+
+```yaml
+name: Deployment Basics
+cluster:
+  disable_traefik: true
+```
+
+Example for a lab that uses the built-in Traefik controller (omit `cluster` or set `disable_traefik: false`):
+
+```yaml
+name: Ingress with Traefik
+# Traefik is on by default — no cluster block needed
+```
 
 ### `tabs` shape
 

@@ -168,6 +168,9 @@ func (m *Manager) SelectLab(ctx context.Context, id string) (WorkshopState, erro
 	}
 
 	m.exposure.Clear()
+	if err := WriteClusterProfile(m.labsRoot, id); err != nil {
+		return WorkshopState{}, err
+	}
 	if err := m.cluster.Reset(ctx); err != nil {
 		return WorkshopState{}, err
 	}
@@ -220,6 +223,9 @@ func (m *Manager) RestartLab(ctx context.Context) (WorkshopState, error) {
 	}
 
 	m.exposure.Clear()
+	if err := WriteClusterProfile(m.labsRoot, m.activeID); err != nil {
+		return WorkshopState{}, err
+	}
 	if err := m.cluster.Reset(ctx); err != nil {
 		return WorkshopState{}, err
 	}
