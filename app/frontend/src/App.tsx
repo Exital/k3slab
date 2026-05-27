@@ -91,6 +91,36 @@ function DismissibleMessagePanel({
   );
 }
 
+function ClusterStatusBadge({
+  ready,
+  status,
+}: {
+  ready: boolean;
+  status: LabStatus["cluster"];
+}) {
+  if (ready) {
+    return (
+      <span
+        className="inline-flex shrink-0 items-center rounded-full border border-emerald-300/70 bg-emerald-100 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200"
+        role="status"
+        aria-live="polite"
+      >
+        Cluster ready
+      </span>
+    );
+  }
+  const label = status === "resetting" ? "Cluster restarting" : "Cluster not ready";
+  return (
+    <span
+      className="inline-flex shrink-0 items-center rounded-full border border-rose-300/70 bg-rose-100 px-2.5 py-1 font-mono text-[10px] font-medium uppercase tracking-wider text-rose-800 dark:border-rose-500/35 dark:bg-rose-500/15 dark:text-rose-200"
+      role="status"
+      aria-live="polite"
+    >
+      {label}
+    </span>
+  );
+}
+
 type AppProps = {
   theme: ThemeMode;
   setTheme: Dispatch<SetStateAction<ThemeMode>>;
@@ -559,42 +589,29 @@ export default function App({ theme, setTheme }: AppProps) {
         </div>
       )}
       {/* Top app bar — Stitch / DESIGN.md */}
-      <header className="z-50 flex h-16 shrink-0 items-center justify-between border-b border-slate-400/25 bg-[#eceef3]/95 px-5 backdrop-blur-sm dark:border-k3-outline-variant dark:bg-k3-surface dark:backdrop-blur-none">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <div className="flex min-w-0 items-center gap-6">
-            <div className="min-w-0">
-              <span className="block truncate font-display text-xl font-extrabold tracking-tight text-slate-900 dark:text-k3-primary">
-                {pickerRequired ? "K3sLab" : (state?.name ?? "K3sLab")}
+      <header className="z-50 flex h-16 shrink-0 items-center justify-between border-b border-slate-400/25 bg-[#eceef3]/95 px-6 backdrop-blur-sm dark:border-k3-outline-variant dark:bg-k3-surface dark:backdrop-blur-none">
+        <div className="flex min-w-0 flex-1 items-center gap-8">
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="block truncate font-display text-xl font-extrabold tracking-tight text-slate-900 dark:text-k3-primary">
+              {pickerRequired ? "K3sLab" : (state?.name ?? "K3sLab")}
+            </span>
+            {state?.labId && !pickerRequired ? (
+              <span className="font-mono text-xs text-slate-500 dark:text-k3-on-surface-variant">
+                lab: {state.labId}
               </span>
-              {state?.labId && !pickerRequired ? (
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs text-slate-500 dark:text-k3-on-surface-variant">
-                    lab: {state.labId}
-                  </span>
-                  <span
-                    className={
-                      clusterReady
-                        ? "rounded-full border border-emerald-300/70 bg-emerald-100 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200"
-                        : "rounded-full border border-amber-300/70 bg-amber-100 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/15 dark:text-amber-200"
-                    }
-                  >
-                    cluster: {clusterStatus}
-                  </span>
-                </div>
-              ) : null}
-            </div>
-            {catalog ? (
-              <LabSwitcher
-                catalog={catalog}
-                activeId={catalog.activeId || state?.labId}
-                open={labSwitcherOpen}
-                busy={busy || labRestarting}
-                onToggle={() => setLabSwitcherOpen((o) => !o)}
-                onClose={() => setLabSwitcherOpen(false)}
-                onSelect={(id) => void onSelectLab(id)}
-              />
             ) : null}
           </div>
+          {catalog ? (
+            <LabSwitcher
+              catalog={catalog}
+              activeId={catalog.activeId || state?.labId}
+              open={labSwitcherOpen}
+              busy={busy || labRestarting}
+              onToggle={() => setLabSwitcherOpen((o) => !o)}
+              onClose={() => setLabSwitcherOpen(false)}
+              onSelect={(id) => void onSelectLab(id)}
+            />
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           {detached && (
@@ -751,11 +768,6 @@ export default function App({ theme, setTheme }: AppProps) {
                 {state?.error && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-100">
                     Workshop: {state.error}
-                  </div>
-                )}
-                {!labRestarting && !clusterReady && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-100">
-                    Cluster is still starting. You can read the workshop and use the terminal now; setup/verify actions will unlock automatically when the cluster becomes ready.
                   </div>
                 )}
                 {actionErr && (
@@ -940,12 +952,9 @@ export default function App({ theme, setTheme }: AppProps) {
                     <div className="h-3 w-3 rounded-full bg-emerald-500/50" />
                   </div>
                   <div className="hidden h-6 w-px bg-slate-300 sm:block dark:bg-k3-outline-variant" />
-                  <span className="hidden items-center gap-2 truncate font-mono text-xs text-slate-600 sm:flex dark:text-k3-on-surface-variant">
-                    <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-k3-secondary" />
-                    connected: lab shell
-                  </span>
+                  <ClusterStatusBadge ready={clusterReady} status={clusterStatus} />
                 </div>
-                <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-x-auto">
+                <div className="flex min-w-0 flex-1 items-center justify-end gap-2 overflow-x-auto">
                   <button
                     type="button"
                     className={chromeBtn}
