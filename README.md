@@ -100,7 +100,7 @@ A single custom lab: create `01-my-course/workshop.yml` and mount the parent dir
 
 - Health: `curl -sf http://127.0.0.1:3010/health`
 - Lab status: `curl -s http://127.0.0.1:3010/api/lab/status` → `{"cluster":"ready"}`, `{"cluster":"resetting"}`, or `{"cluster":"unavailable"}`
-- If the UI never loads, confirm the container logs show `Cluster is Ready` and `listening on 0.0.0.0:3010` (or your `K3SLAB_LISTEN` value).
+- The UI starts before cluster readiness; if setup/verify actions stay disabled, watch `/api/lab/status` until it becomes `{"cluster":"ready"}`.
 
 ### Restart lab
 

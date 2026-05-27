@@ -64,6 +64,10 @@ start_k3s_log_rotator
 
 cleanup() {
   echo "[k3slab] Shutting down..."
+  if [[ -n "${READY_WAIT_PID:-}" ]] && kill -0 "${READY_WAIT_PID}" 2>/dev/null; then
+    kill "${READY_WAIT_PID}" 2>/dev/null || true
+    wait "${READY_WAIT_PID}" 2>/dev/null || true
+  fi
   if [[ -n "${K3S_ROTATOR_PID:-}" ]] && kill -0 "${K3S_ROTATOR_PID}" 2>/dev/null; then
     kill "${K3S_ROTATOR_PID}" 2>/dev/null || true
     wait "${K3S_ROTATOR_PID}" 2>/dev/null || true
@@ -76,8 +80,6 @@ cleanup() {
 }
 trap cleanup SIGINT SIGTERM
 
-wait_ready
-
 export LABS_ROOT="${LABS_ROOT:-/lab}"
 export LAB_ID="${LAB_ID:-01-kubectl-basics}"
 export K3SLAB_LISTEN="${K3SLAB_LISTEN:-0.0.0.0:3010}"
@@ -86,6 +88,13 @@ export K3SLAB_STATIC_DIR="${K3SLAB_STATIC_DIR:-/app/frontend/dist}"
 echo "[k3slab] Starting API on ${K3SLAB_LISTEN}..."
 /app/k3slab &
 APP_PID=$!
+
+(
+  if ! wait_ready; then
+    echo "[k3slab] Cluster is still unavailable; API remains up and status endpoint reports unavailable."
+  fi
+) &
+READY_WAIT_PID=$!
 
 wait "${APP_PID}"
 exit_code=$?

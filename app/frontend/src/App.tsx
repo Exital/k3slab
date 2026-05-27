@@ -16,6 +16,7 @@ import {
   submitAnswer,
   waitForLabReady,
   type LabCatalog,
+  type LabStatus,
   type WorkshopState,
 } from "./api";
 import { LabPicker, LabSwitcher } from "./LabPicker";
@@ -112,6 +113,8 @@ export default function App({ theme, setTheme }: AppProps) {
   const [catalog, setCatalog] = useState<LabCatalog | null>(null);
   const [labSwitcherOpen, setLabSwitcherOpen] = useState(false);
   const [labSwitchMessage, setLabSwitchMessage] = useState("Restarting lab…");
+  const [clusterStatus, setClusterStatus] = useState<LabStatus["cluster"]>("unavailable");
+  const clusterReady = clusterStatus === "ready";
   const exposedEndpoints = useExposedEndpoints();
   const { detached, detach, dock, popupBlocked } = useTerminalDetach();
   const autoKey = useRef<string>("");
@@ -205,43 +208,36 @@ export default function App({ theme, setTheme }: AppProps) {
   }, []);
 
   useEffect(() => {
-    void (async () => {
+    let closed = false;
+    const pollStatus = async () => {
       try {
         const status = await getLabStatus();
+        if (closed) return;
+        setClusterStatus(status.cluster);
         if (status.cluster === "resetting") {
           setLabRestarting(true);
-        } else if (status.cluster === "unavailable") {
-          setLabRestartFailed(LAB_RESTART_FAILED_MSG);
-          setLabRestarting(true);
+          return;
+        }
+        if (status.cluster === "ready" && labRestarting && !labRestartFailed) {
+          setLabRestarting(false);
+          await refresh();
         }
       } catch {
-        // ignore status probe errors on load
+        // ignore status probe errors while server starts
       }
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!labRestarting || labRestartFailed) return;
+    };
+    void pollStatus();
     const id = window.setInterval(() => {
-      void (async () => {
-        try {
-          const status = await getLabStatus();
-          if (status.cluster === "ready") {
-            setLabRestarting(false);
-            await refresh();
-          } else if (status.cluster === "unavailable") {
-            setLabRestartFailed(LAB_RESTART_FAILED_MSG);
-          }
-        } catch {
-          // ignore poll errors during reset
-        }
-      })();
+      void pollStatus();
     }, 2000);
-    return () => window.clearInterval(id);
+    return () => {
+      closed = true;
+      window.clearInterval(id);
+    };
   }, [labRestartFailed, labRestarting, refresh]);
 
   useEffect(() => {
-    if (labRestarting || !state || state.error || state.done || !state.current) return;
+    if (labRestarting || !clusterReady || !state || state.error || state.done || !state.current) return;
 
     const key = `${state.currentStepIndex}:${state.current.id}:${state.current.type}`;
     const run = async () => {
@@ -282,7 +278,7 @@ export default function App({ theme, setTheme }: AppProps) {
     };
 
     void run();
-  }, [labRestarting, state]);
+  }, [clusterReady, labRestarting, state]);
 
   useEffect(() => {
     if (state?.current?.type === "question") {
@@ -306,15 +302,16 @@ export default function App({ theme, setTheme }: AppProps) {
 
   const canSubmit = useMemo(() => {
     if (!current || current.type !== "question") return false;
+    if (!clusterReady) return false;
     if (current.answer_type === "observe") return false;
     if (!current.setupDone || busy || awaitingNext) return false;
     if (current.answer_type === "text") return answer.trim().length > 0;
     return answer.length > 0;
-  }, [answer, awaitingNext, busy, current]);
+  }, [answer, awaitingNext, busy, clusterReady, current]);
 
   const runObserveCheck = useCallback(async () => {
     if (!current || current.type !== "question" || current.answer_type !== "observe") return;
-    if (!current.setupDone || current.completed || checkInFlight.current || busy) return;
+    if (!clusterReady || !current.setupDone || current.completed || checkInFlight.current || busy) return;
     checkInFlight.current = true;
     try {
       const r = await checkQuestion();
@@ -331,7 +328,7 @@ export default function App({ theme, setTheme }: AppProps) {
     } finally {
       checkInFlight.current = false;
     }
-  }, [busy, current]);
+  }, [busy, clusterReady, current]);
 
   useEffect(() => {
     if (observePollRef.current) {
@@ -340,6 +337,7 @@ export default function App({ theme, setTheme }: AppProps) {
     }
     if (
       labRestarting ||
+      !clusterReady ||
       !current ||
       current.type !== "question" ||
       current.answer_type !== "observe" ||
@@ -361,6 +359,7 @@ export default function App({ theme, setTheme }: AppProps) {
     };
   }, [
     current,
+    clusterReady,
     labRestarting,
     runObserveCheck,
     state?.currentStepIndex,
@@ -368,6 +367,10 @@ export default function App({ theme, setTheme }: AppProps) {
 
   const onSubmit = async () => {
     if (!current || current.type !== "question") return;
+    if (!clusterReady) {
+      setActionErr("Cluster is not ready yet. Wait until readiness turns green, then try again.");
+      return;
+    }
     setBusy(true);
     setActionErr(null);
     try {
@@ -396,6 +399,10 @@ export default function App({ theme, setTheme }: AppProps) {
   };
 
   const onNextQuestion = async () => {
+    if (!clusterReady) {
+      setActionErr("Cluster is not ready yet. Wait until readiness turns green, then continue.");
+      return;
+    }
     setBusy(true);
     setActionErr(null);
     try {
@@ -466,7 +473,7 @@ export default function App({ theme, setTheme }: AppProps) {
   const correctMessageText = current?.correct_message?.trim() ?? "";
   const showIncorrectPanel = hadFailure && !incorrectPanelDismissed;
   const showCorrectPanel = awaitingNext && correctMessageText.length > 0 && !correctPanelDismissed;
-  const answerDisabled = busy || awaitingNext;
+  const answerDisabled = busy || awaitingNext || !clusterReady;
 
   const progressMeta = useMemo(() => {
     if (!state || state.error) {
@@ -560,9 +567,20 @@ export default function App({ theme, setTheme }: AppProps) {
                 {pickerRequired ? "K3sLab" : (state?.name ?? "K3sLab")}
               </span>
               {state?.labId && !pickerRequired ? (
-                <span className="font-mono text-xs text-slate-500 dark:text-k3-on-surface-variant">
-                  lab: {state.labId}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs text-slate-500 dark:text-k3-on-surface-variant">
+                    lab: {state.labId}
+                  </span>
+                  <span
+                    className={
+                      clusterReady
+                        ? "rounded-full border border-emerald-300/70 bg-emerald-100 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200"
+                        : "rounded-full border border-amber-300/70 bg-amber-100 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-amber-800 dark:border-amber-400/35 dark:bg-amber-500/15 dark:text-amber-200"
+                    }
+                  >
+                    cluster: {clusterStatus}
+                  </span>
+                </div>
               ) : null}
             </div>
             {catalog ? (
@@ -733,6 +751,11 @@ export default function App({ theme, setTheme }: AppProps) {
                 {state?.error && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-100">
                     Workshop: {state.error}
+                  </div>
+                )}
+                {!labRestarting && !clusterReady && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-700/50 dark:bg-amber-950/40 dark:text-amber-100">
+                    Cluster is still starting. You can read the workshop and use the terminal now; setup/verify actions will unlock automatically when the cluster becomes ready.
                   </div>
                 )}
                 {actionErr && (
