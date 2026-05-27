@@ -53,7 +53,7 @@ For other Ingress or NodePort workloads, publish the matching ports and set **`K
 #### Environment variables
 
 - **`K3SLAB_PUBLIC_ORIGIN`** (optional): scheme + host for **NodePort** links. Default `http://localhost`.
-- **`K3SLAB_INGRESS_HTTP_PORT`** / **`K3SLAB_INGRESS_HTTPS_PORT`** (optional): defaults **80** / **443** for Ingress URLs if you customized Traefik.
+- **`K3SLAB_INGRESS_HTTP_PORT`** / **`K3SLAB_INGRESS_HTTPS_PORT`** (optional): defaults **80** / **443** for Ingress URLs if you customized the ingress controller.
 - **`k9s_enable`** (optional): default **`false`**. Set to **`true`** (or `1` / `yes`) to put the pre-installed **k9s** binary on `PATH`. The image bundles k9s at `/usr/local/lib/k3slab/k9s`; the entrypoint symlinks it to `/usr/local/bin/k9s` only when enabled.
 - **`K3SLAB_DEBUG`** (optional): set to **`true`** (or `1` / `yes`) to log exposure watcher sync/resync messages (`exposure: synced …`, `exposure: periodic resync …`). Off by default so routine logs stay quiet.
 - **`K3SLAB_ALLOW_CLUSTER_RESET`** (optional): default **`true`**. Set to **`false`** (or `0` / `no`) to disable **Restart lab** and **lab switching** (`POST /api/lab/restart`, `POST /api/labs/select`).

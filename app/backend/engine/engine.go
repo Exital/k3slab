@@ -298,7 +298,7 @@ func (e *Engine) SubmitAnswer(ctx context.Context, answer string) (ok bool, logs
 	defer cancel()
 	answer = strings.TrimSpace(answer)
 	env := append(e.kubeEnv(), "ANSWER="+answer)
-	code, err := e.runShellWithEnv(ctx, st.Verify, &e.lastVerify, e.hub, env)
+	code, err := e.runVerifyShell(ctx, st.Verify, &e.lastVerify, e.hub, env)
 	if err != nil {
 		return false, e.lastVerify.String(), err
 	}
@@ -333,7 +333,7 @@ func (e *Engine) CheckQuestion(ctx context.Context) (ok bool, logs string, err e
 	e.lastVerify.Reset()
 	ctx, cancel := context.WithTimeout(ctx, verifyTimeout)
 	defer cancel()
-	code, err := e.runShellWithEnv(ctx, st.Verify, &e.lastVerify, nil, e.kubeEnv())
+	code, err := e.runVerifyShell(ctx, st.Verify, &e.lastVerify, nil, e.kubeEnv())
 	if err != nil {
 		return false, e.lastVerify.String(), err
 	}
@@ -375,6 +375,17 @@ func (e *Engine) runShell(ctx context.Context, script string, accum *strings.Bui
 }
 
 func (e *Engine) runShellWithEnv(ctx context.Context, script string, accum *strings.Builder, hub *loghub.Hub, env []string) (int, error) {
+	return e.runShellWithEnvOpts(ctx, script, accum, hub, env, false)
+}
+
+func (e *Engine) runVerifyShell(ctx context.Context, script string, accum *strings.Builder, hub *loghub.Hub, env []string) (int, error) {
+	return e.runShellWithEnvOpts(ctx, script, accum, hub, env, true)
+}
+
+func (e *Engine) runShellWithEnvOpts(ctx context.Context, script string, accum *strings.Builder, hub *loghub.Hub, env []string, errexit bool) (int, error) {
+	if errexit {
+		script = "set -e\n" + script
+	}
 	cmd := exec.CommandContext(ctx, "bash", "-lc", script)
 	cmd.Dir = e.labRoot
 	cmd.Env = env

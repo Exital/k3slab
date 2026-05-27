@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
-import ReactMarkdown from "react-markdown";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import {
   advanceQuestion,
@@ -20,6 +19,7 @@ import {
   type WorkshopState,
 } from "./api";
 import { LabPicker, LabSwitcher } from "./LabPicker";
+import { MarkdownContent } from "./components/MarkdownContent";
 import { MIcon } from "./components/MIcon";
 import { useExposedEndpoints } from "./hooks/useExposedEndpoints";
 import { useTerminalDetach } from "./hooks/useTerminalDetach";
@@ -65,7 +65,7 @@ function DismissibleMessagePanel({
               : "text-rose-900 dark:text-k3-on-error-container [&_code]:rounded [&_code]:bg-rose-100 [&_code]:px-1.5 dark:[&_code]:bg-k3-surface-lowest [&_p]:mb-2 [&_p:last-child]:mb-0"
           }
         >
-          <ReactMarkdown>{text}</ReactMarkdown>
+          <MarkdownContent>{text}</MarkdownContent>
         </div>
       ) : (
         <p className={isSuccess ? "text-emerald-900 dark:text-k3-secondary" : "text-rose-900 dark:text-k3-on-error-container"}>
@@ -749,9 +749,9 @@ export default function App({ theme, setTheme }: AppProps) {
                     <h1 className="font-display text-2xl font-semibold tracking-tight text-slate-900 dark:text-k3-on-background md:text-3xl">
                       {markdownTab.title}
                     </h1>
-                    <div className="text-base leading-relaxed text-slate-700 dark:text-k3-on-surface-variant [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:font-mono [&_code]:text-sm dark:[&_code]:bg-k3-surface-container-highest dark:[&_code]:text-k3-primary [&_p]:mb-2 [&_ul]:mb-2 [&_li]:mb-0.5 [&_h2]:mt-4 [&_h2]:font-display [&_h2]:text-lg [&_h2]:font-semibold">
-                      <ReactMarkdown>{markdownTab.content}</ReactMarkdown>
-                    </div>
+                    <MarkdownContent className="text-base leading-relaxed text-slate-700 dark:text-k3-on-surface-variant [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:font-mono [&_code]:text-sm dark:[&_code]:bg-k3-surface-container-highest dark:[&_code]:text-k3-primary [&_p]:mb-2 [&_ul]:mb-2 [&_li]:mb-0.5 [&_h2]:mt-4 [&_h2]:font-display [&_h2]:text-lg [&_h2]:font-semibold">
+                      {markdownTab.content}
+                    </MarkdownContent>
                   </div>
                 ) : (
                   <>
@@ -775,9 +775,9 @@ export default function App({ theme, setTheme }: AppProps) {
                     </div>
 
                     {current.type === "question" && current.description && (
-                      <div className="text-base leading-relaxed text-slate-600 dark:text-k3-on-surface-variant [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:font-mono [&_code]:text-sm dark:[&_code]:bg-k3-surface-container-highest dark:[&_code]:text-k3-primary">
-                        <ReactMarkdown>{current.description}</ReactMarkdown>
-                      </div>
+                      <MarkdownContent className="text-base leading-relaxed text-slate-600 dark:text-k3-on-surface-variant [&_code]:rounded [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:font-mono [&_code]:text-sm dark:[&_code]:bg-k3-surface-container-highest dark:[&_code]:text-k3-primary">
+                        {current.description}
+                      </MarkdownContent>
                     )}
 
                     {showIncorrectPanel && (

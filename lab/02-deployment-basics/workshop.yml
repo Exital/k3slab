@@ -3,73 +3,97 @@ description: Troubleshoot the simple-ctf Deployment, Service, and Ingress, then 
 
 tabs:
   steps:
-    - id: deploy-lab-stack
-      type: task
-      title: Deploy the CTF lab
-      run: bash scripts/setup.sh
+    - id: question-deploy-manifests
+      type: question
+      title: Deploy the lab manifests
+      description: |
+        Deploy the lab stack from the **`manifests/`** directory in this lab folder using **`kubectl apply`** (you choose flags such as `-f` and the path — the full command is not given here).
+
+        This step completes automatically once the namespace and workloads are present in the cluster.
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        Lab manifests are applied in namespace **`deployment-basics`**.
+      verify: |
+        kubectl get ns deployment-basics &>/dev/null
+        kubectl get deploy simple-ctf -n deployment-basics &>/dev/null
+        kubectl get svc simple-ctf-svc -n deployment-basics &>/dev/null
+        kubectl get ingress simple-ctf-ingress -n deployment-basics &>/dev/null
+        kubectl get cm simple-ctf-entrypoint -n deployment-basics &>/dev/null
+      hints:
+        - "From the lab directory: `kubectl apply -f manifests/` (not `manifests/*` — use the directory path)"
+        - "If some objects failed with **namespace not found**, run `kubectl apply -f manifests/` again (namespace is applied first via `00-namespace.yml`)"
+        - "`kubectl get deploy,svc,ingress -n deployment-basics`"
+        - "Ingress uses class **`nginx`** (installed by k3slab instead of Traefik)"
 
     - id: question-image-tag
       type: question
       title: Fix the container image tag
       description: |
-        The Deployment cannot pull the application image.
-        Inspect events or the Deployment spec, fix the image to use the correct tag, and submit the **tag name only** (the part after `:`).
-      answer_type: text
+        The Deployment cannot pull the application image with the broken tag in the manifest.
+
+        Pick a **valid tag** for [simple-ctf on GitHub Container Registry](https://github.com/Exital/simple-ctf/pkgs/container/simple-ctf) (`ghcr.io/exital/simple-ctf`) and update the Deployment image.
+
+        This step completes automatically once the Deployment uses a tag that exists in the registry.
+      answer_type: observe
+      poll_interval_seconds: 5
       correct_message: |
-        Correct — the image should be **`ghcr.io/exital/simple-ctf:latest`**.
+        The Deployment image uses a valid **`ghcr.io/exital/simple-ctf`** tag.
       verify: |
         img=$(kubectl get deploy simple-ctf -n deployment-basics -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)
-        echo "$img" | grep -q ':latest$'
-        test "$ANSWER" = "latest"
+        case "$img" in
+          ghcr.io/exital/simple-ctf:*) ;;
+          *) exit 1 ;;
+        esac
+        tag="${img#ghcr.io/exital/simple-ctf:}"
+        test -n "$tag"
+        tags=$(curl -sf \
+          -H "Authorization: Bearer $(curl -sf 'https://ghcr.io/token?scope=repository:exital/simple-ctf:pull' | jq -r .token)" \
+          https://ghcr.io/v2/exital/simple-ctf/tags/list | jq -r '.tags[]')
+        echo "$tags" | grep -qxF "$tag"
       hints:
         - "`kubectl describe deploy simple-ctf -n deployment-basics`"
-        - "The registry path is `ghcr.io/exital/simple-ctf` — only the tag is wrong"
-
-    - id: question-env-name
-      type: question
-      title: Environment variable from logs
-      description: |
-        After the image pulls, pods may still crash. Read **pod logs** from the lab entrypoint script.
-        Which **environment variable name** must be set? Submit the variable name only.
-      answer_type: text
-      correct_message: |
-        Right — the wrapper requires **`CTF_RELAY_MODE`**.
-      verify: |
-        test "$ANSWER" = "CTF_RELAY_MODE"
-      hints:
-        - "`kubectl get pods -n deployment-basics`"
-        - "`kubectl logs -n deployment-basics -l app=simple-ctf --tail=50`"
+        - "List published tags: `curl -s -H \"Authorization: Bearer $(curl -sf 'https://ghcr.io/token?scope=repository:exital/simple-ctf:pull' | jq -r .token)\" https://ghcr.io/v2/exital/simple-ctf/tags/list | jq -r '.tags[]'`"
+        - "`kubectl set image deploy/simple-ctf simple-ctf=ghcr.io/exital/simple-ctf:<tag> -n deployment-basics`"
 
     - id: question-env-value
       type: question
       title: Required value for CTF_RELAY_MODE
       description: |
-        Set the variable on the Deployment container (e.g. `kubectl edit deploy` or `kubectl set env`).
-        Submit the **exact value** the logs say is required.
-      answer_type: text
+        After the image pulls, pods may still crash. Read **pod logs** from the lab entrypoint script, then set **`CTF_RELAY_MODE`** on the Deployment to the value the logs require.
+
+        This step completes automatically once the variable is set correctly and the container is **Running** and **ready**.
+      answer_type: observe
+      poll_interval_seconds: 5
       correct_message: |
-        Correct — set **`CTF_RELAY_MODE=active`**. The app entrypoint can then generate a FLAG and start the server.
+        **`CTF_RELAY_MODE=active`** — the app entrypoint can generate a FLAG and start the server.
       verify: |
         val=$(kubectl get deploy simple-ctf -n deployment-basics -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="CTF_RELAY_MODE")].value}' 2>/dev/null)
         test "$val" = "active"
-        test "$ANSWER" = "active"
+        pod=$(kubectl get pods -n deployment-basics -l app=simple-ctf -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        test -n "$pod"
+        kubectl get pod "$pod" -n deployment-basics -o jsonpath='{.status.phase}' | grep -qx Running
+        kubectl get pod "$pod" -n deployment-basics -o jsonpath='{.status.containerStatuses[0].ready}' | grep -qx true
       hints:
+        - "`kubectl logs -n deployment-basics -l app=simple-ctf --tail=50`"
         - "`kubectl set env deploy/simple-ctf -n deployment-basics CTF_RELAY_MODE=active`"
-        - "Wait for the pod to become Running before continuing"
 
     - id: question-service-selector
       type: question
       title: Service selector label
       description: |
-        The **Service** must route traffic to the Deployment pods. Check `kubectl get svc,endpoints -n deployment-basics`.
-        Submit the **label value** the Service selector should use (the `app` label on pods).
-      answer_type: text
+        The **Service** must route traffic to the Deployment pods. Check `kubectl get svc,endpoints -n deployment-basics` and fix the selector.
+
+        This step completes automatically once the Service has endpoints backing it.
+      answer_type: observe
+      poll_interval_seconds: 5
       correct_message: |
-        Correct — the selector should match **`app=simple-ctf`**.
+        Service selector matches **`app=simple-ctf`** and endpoints are populated.
       verify: |
         sel=$(kubectl get svc simple-ctf-svc -n deployment-basics -o jsonpath='{.spec.selector.app}' 2>/dev/null)
         test "$sel" = "simple-ctf"
-        test "$ANSWER" = "simple-ctf"
+        ip=$(kubectl get endpoints simple-ctf-svc -n deployment-basics -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null)
+        test -n "$ip"
       hints:
         - "`kubectl get deploy simple-ctf -n deployment-basics --show-labels`"
         - "`kubectl edit svc simple-ctf-svc -n deployment-basics`"
@@ -78,51 +102,45 @@ tabs:
       type: question
       title: Ingress backend service name
       description: |
-        The **Ingress** must point at the correct **Service** name (port 3000). The `/ctf` path and Traefik strip-prefix middleware are already configured.
-        Fix the Ingress backend and submit the **Service name**.
-      answer_type: text
-      correct_message: |
-        Correct — the Ingress backend service is **`simple-ctf-svc`**.
-      verify: |
-        svc=$(kubectl get ingress simple-ctf-ingress -n deployment-basics -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.name}' 2>/dev/null)
-        test "$svc" = "simple-ctf-svc"
-        test "$ANSWER" = "simple-ctf-svc"
-      hints:
-        - "`kubectl get ingress simple-ctf-ingress -n deployment-basics -o yaml`"
-        - "`kubectl get svc -n deployment-basics`"
+        The **Ingress** must point at the correct **Service** name on port 3000. The NGINX rewrite annotations (strip **`/ctf`** so the app sees **`/`**, not **`/ctf`**) are already configured.
 
-    - id: question-ingress-path
-      type: question
-      title: URL path for the CTF UI
-      description: |
-        Once the app is healthy, open it in your browser (Docker must publish **port 80**).
-        Submit the **path prefix** where the CTF UI is exposed (starts with `/`).
-      answer_type: text
-      correct_message: |
-        Open **`http://localhost/ctf/`** — Traefik strips the `/ctf` prefix before forwarding to the app.
-      verify: |
-        test "$ANSWER" = "/ctf"
-      hints:
-        - "Check the Ingress `spec.rules[].http.paths[].path`"
-        - "Use the host from the Ingress rule (`localhost`)"
-
-    - id: question-flag-ready
-      type: question
-      title: Wait for the CTF app
-      description: |
-        Fix the Deployment, Service, and Ingress until the app is healthy.
-        Open **`http://localhost/ctf/`** on your machine (with `-p 80:80` on `docker run`) when ready — this step completes automatically.
+        Fix the Ingress backend — this step completes automatically when the Ingress spec is correct.
       answer_type: observe
       poll_interval_seconds: 5
       correct_message: |
-        The deployment is healthy and the flag API responds at `/ctf/api/flag`.
+        Ingress backend is **`simple-ctf-svc`** on port **3000**. The app is exposed at **`http://localhost/ctf/`** (publish **`-p 80:80`** on `docker run`); NGINX rewrites **`/ctf/...`** so the app sees **`/...`** (e.g. `/ctf/api/flag` → `/api/flag`).
+      verify: |
+        svc=$(kubectl get ingress simple-ctf-ingress -n deployment-basics -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.name}' 2>/dev/null)
+        test "$svc" = "simple-ctf-svc"
+        port=$(kubectl get ingress simple-ctf-ingress -n deployment-basics -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.port.number}' 2>/dev/null)
+        test "$port" = "3000"
+      hints:
+        - "`kubectl get ingress simple-ctf-ingress -n deployment-basics -o yaml`"
+        - "`kubectl get svc -n deployment-basics`"
+        - "Path and rewrite annotations are already set on the Ingress — only the backend **service name** needs fixing"
+
+    - id: question-flag-ready
+      type: question
+      title: Capture the flag
+      description: |
+        Open **`http://localhost/ctf/`** on your machine (with **`-p 80:80`** on `docker run`), or use **`curl`** against **`/ctf/api/flag`**.
+
+        Paste the **flag** value here (e.g. `CTF{...}`).
+      answer_type: text
+      correct_message: |
+        Correct — the deployment is healthy and the flag API matches your answer.
+      incorrect_message: |
+        That flag does not match **`GET /ctf/api/flag`**. Check the app is reachable (`curl -s -H 'Host: localhost' http://127.0.0.1/ctf/api/flag`) and paste the exact **`flag`** field from the JSON.
       verify: |
         ready=$(kubectl get deploy simple-ctf -n deployment-basics -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
         test "$ready" = "1"
-        curl -sf -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | grep -q '"flag"'
+        expected=$(curl -sf -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | jq -r .flag)
+        test -n "$expected"
+        test "$ANSWER" = "$expected"
       hints:
         - "`curl -s -H 'Host: localhost' http://127.0.0.1/ctf/api/flag`"
         - "Terminal header may show an **Open in browser** tab for `localhost/ctf`"
+        - "Submit the flag string only (no JSON wrapper)"
 
   markdowns:
     - id: cheat-sheet
@@ -131,11 +149,12 @@ tabs:
       content: |
         ## Debugging deployments
 
+        - Deploy lab: `kubectl apply -f manifests/` (from the lab directory)
         - Workloads: `kubectl get deploy,pods,svc,ingress -n deployment-basics`
         - Events: `kubectl describe deploy simple-ctf -n deployment-basics`
         - Logs: `kubectl logs -n deployment-basics -l app=simple-ctf`
         - Edit resources: `kubectl edit deploy/svc/ingress ... -n deployment-basics`
-        - Set image: `kubectl set image deploy/simple-ctf simple-ctf=ghcr.io/exital/simple-ctf:latest -n deployment-basics`
+        - Set image: `kubectl set image deploy/simple-ctf simple-ctf=ghcr.io/exital/simple-ctf:<tag> -n deployment-basics`
 
     - id: ctf-app
       title: CTF app
@@ -143,9 +162,9 @@ tabs:
       content: |
         ## [simple-ctf](https://github.com/Exital/simple-ctf)
 
-        - Image: `ghcr.io/exital/simple-ctf:latest`
+        - Image: [ghcr.io/exital/simple-ctf](https://github.com/Exital/simple-ctf/pkgs/container/simple-ctf) (pick a valid tag)
         - Listens on port **3000** inside the pod
-        - Requires **`FLAG`** (auto-generated by the image entrypoint when the container starts)
+        - Lab entrypoint requires **`CTF_RELAY_MODE=active`** before starting the app
         - Flag API: `GET /api/flag` — UI loads it in the browser
         - Optional UI strings use `CTF_*` environment variables (see upstream README)
 
@@ -155,4 +174,4 @@ tabs:
       content: |
         Namespace **`deployment-basics`**. Exposed via **Ingress** at **`http://localhost/ctf/`**.
 
-        Run the k3slab container with **`-p 80:80`** (and `-p 3010:3010` for this UI). Traefik strips the `/ctf` prefix before traffic reaches the app.
+        Run the k3slab container with **`-p 80:80`** (and `-p 3010:3010` for this UI). **ingress-nginx** serves **`/ctf`** on port 80 and rewrites paths so the app sees **`/`** (not `/ctf`).

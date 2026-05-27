@@ -4,14 +4,16 @@ metadata:
   name: simple-ctf-ingress
   namespace: deployment-basics
   annotations:
-    traefik.ingress.kubernetes.io/router.middlewares: deployment-basics-strip-ctf-prefix@kubernetescrd
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
 spec:
+  ingressClassName: nginx
   rules:
     - host: localhost
       http:
         paths:
-          - path: /ctf
-            pathType: Prefix
+          - path: /ctf(/|$)(.*)
+            pathType: ImplementationSpecific
             backend:
               service:
                 name: simple-ctf
