@@ -257,9 +257,20 @@ func (e *Engine) RunQuestionSetup(ctx context.Context) (logs string, err error) 
 		e.setupDone[e.current] = true
 		return "", nil
 	}
-	for _, cmdline := range st.Setup {
+	for _, setupCmd := range st.Setup {
+		cmdline := setupCmd.Run
 		e.appendLine(&e.lastSetup, "$ "+cmdline)
 		e.hub.Broadcast("$ " + cmdline)
+		if setupCmd.Background {
+			pid, err := e.startBackgroundShell(cmdline, e.kubeEnv())
+			if err != nil {
+				return e.lastSetup.String(), err
+			}
+			msg := fmt.Sprintf("[setup] background command started (pid=%d)", pid)
+			e.appendLine(&e.lastSetup, msg)
+			e.hub.Broadcast(msg)
+			continue
+		}
 		code, err := e.runShell(ctx, cmdline, &e.lastSetup, e.hub)
 		if err != nil {
 			return e.lastSetup.String(), err
@@ -420,6 +431,18 @@ func (e *Engine) runShellWithEnvOpts(ctx context.Context, script string, accum *
 		return ee.ExitCode(), nil
 	}
 	return -1, err
+}
+
+func (e *Engine) startBackgroundShell(script string, env []string) (int, error) {
+	cmd := exec.Command("bash", "-lc", script)
+	cmd.Dir = e.labRoot
+	cmd.Env = env
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release()
+	return pid, nil
 }
 
 func (e *Engine) drainPipe(r io.Reader, accum *strings.Builder, hub *loghub.Hub, prefix string) {

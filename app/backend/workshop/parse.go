@@ -204,7 +204,7 @@ func normalizeQuestion(rs rawStep, id string) (Step, error) {
 	return st, nil
 }
 
-func parseSetup(v interface{}) ([]string, error) {
+func parseSetup(v interface{}) ([]SetupCommand, error) {
 	if v == nil {
 		return nil, nil
 	}
@@ -214,21 +214,59 @@ func parseSetup(v interface{}) ([]string, error) {
 		if s == "" {
 			return nil, nil
 		}
-		return []string{s}, nil
+		return []SetupCommand{{Run: s}}, nil
+	case map[string]interface{}:
+		cmd, err := parseSetupMap(t)
+		if err != nil {
+			return nil, err
+		}
+		return []SetupCommand{cmd}, nil
 	case []interface{}:
-		var out []string
+		var out []SetupCommand
 		for i, item := range t {
-			s, ok := item.(string)
-			if !ok {
-				return nil, fmt.Errorf("entry %d: expected string", i)
-			}
-			s = strings.TrimSpace(s)
-			if s != "" {
-				out = append(out, s)
+			switch entry := item.(type) {
+			case string:
+				s := strings.TrimSpace(entry)
+				if s != "" {
+					out = append(out, SetupCommand{Run: s})
+				}
+			case map[string]interface{}:
+				cmd, err := parseSetupMap(entry)
+				if err != nil {
+					return nil, fmt.Errorf("entry %d: %w", i, err)
+				}
+				out = append(out, cmd)
+			default:
+				return nil, fmt.Errorf("entry %d: expected string or map", i)
 			}
 		}
 		return out, nil
 	default:
 		return nil, fmt.Errorf("unsupported setup shape %T", v)
 	}
+}
+
+func parseSetupMap(m map[string]interface{}) (SetupCommand, error) {
+	runRaw, ok := m["run"]
+	if !ok {
+		return SetupCommand{}, fmt.Errorf("missing run")
+	}
+	runStr, ok := runRaw.(string)
+	if !ok {
+		return SetupCommand{}, fmt.Errorf("run must be a string")
+	}
+	runStr = strings.TrimSpace(runStr)
+	if runStr == "" {
+		return SetupCommand{}, fmt.Errorf("run must not be empty")
+	}
+
+	cmd := SetupCommand{Run: runStr}
+	if bgRaw, ok := m["background"]; ok {
+		bg, ok := bgRaw.(bool)
+		if !ok {
+			return SetupCommand{}, fmt.Errorf("background must be a boolean")
+		}
+		cmd.Background = bg
+	}
+	return cmd, nil
 }

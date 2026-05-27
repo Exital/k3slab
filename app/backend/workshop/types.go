@@ -33,11 +33,17 @@ type Step struct {
 	Options           []string   `json:"options,omitempty"`
 	IncorrectMessage  string     `json:"incorrect_message,omitempty"` // question: shown when verify fails; optional
 	CorrectMessage    string     `json:"correct_message,omitempty"`   // question: shown after verify succeeds; optional
-	Setup             []string   `json:"-"`                           // commands, not exposed as JSON in raw form
+	Setup             []SetupCommand `json:"-"`                       // commands, not exposed as JSON in raw form
 	Verify            string     `json:"-"`
 	Hints                 []string   `json:"hints,omitempty"`
 	PollIntervalSeconds   int        `json:"poll_interval_seconds,omitempty"` // observe only
 	Run                   string     `json:"-"`
+}
+
+// SetupCommand is one question setup command entry.
+type SetupCommand struct {
+	Run        string
+	Background bool
 }
 
 // SidebarTab is reference markdown shown in the UI sidebar (not a progression step).

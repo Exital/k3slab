@@ -221,9 +221,20 @@ After setup finishes, the learner submits an answer; the **`verify`** script dec
 
 - **Omitted** or **`null`** — no setup commands.
 - A **single string** — one command (equivalent to a one-element list).
-- A **list of strings** — commands run **in order**; the first failure stops setup and leaves the question blocked until setup succeeds (e.g. after you fix the lab and refresh).
+- A **single object** — one command with explicit fields:
+  - `run` (string, required): command to execute.
+  - `background` (bool, optional): when `true`, start it and continue without waiting.
+- A **list** containing strings and/or objects — processed in order; synchronous commands still fail-fast.
 
 Each command is executed as **`bash -lc "<command>"`** with working directory set to the **active lab folder** (the subdirectory under **`LABS_ROOT`** that contains `workshop.yml`).
+
+Example background setup entry:
+
+```yaml
+setup:
+  - run: bash scripts/install-ingress.sh
+    background: true
+```
 
 ### Execution environment (for `run`, `setup`, and `verify`)
 
