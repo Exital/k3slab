@@ -69,10 +69,15 @@ RUN set -eux; \
 WORKDIR /
 
 COPY docker/k3s-lifecycle.sh /usr/local/lib/k3slab/k3s-lifecycle.sh
+COPY docker/terminal-bashrc.sh /usr/local/lib/k3slab/terminal-bashrc.sh
+COPY docker/profile.d-k3slab-terminal.sh /etc/profile.d/k3slab-terminal.sh
 COPY docker/cluster-reset.sh /usr/local/bin/k3slab-cluster-reset
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /usr/local/lib/k3slab/k3s-lifecycle.sh /usr/local/bin/k3slab-cluster-reset /entrypoint.sh \
-    && mkdir -p /run/k3slab /var/lib/k3slab
+    && mkdir -p /run/k3slab /var/lib/k3slab \
+    && touch /root/.bashrc \
+    && ( grep -q 'terminal-bashrc.sh' /root/.bashrc 2>/dev/null || \
+      { printf '%s\n' '# k3slab terminal prompt' '[ -f /usr/local/lib/k3slab/terminal-bashrc.sh ] && . /usr/local/lib/k3slab/terminal-bashrc.sh' '' | cat - /root/.bashrc > /tmp/k3slab-bashrc && mv /tmp/k3slab-bashrc /root/.bashrc; } )
 
 COPY --from=backend-build /out/k3slab /app/k3slab
 COPY --from=frontend-build /src/frontend/dist /app/frontend/dist

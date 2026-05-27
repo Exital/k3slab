@@ -267,7 +267,7 @@ All workshop shell snippets run with:
 - **Working directory**: the active lab directory so paths like `bash scripts/foo.sh` or `kubectl apply -f manifests/app.yml` resolve next to `workshop.yml`.
 - **Environment**: Host environment plus **`KUBECONFIG`** (defaults to the in-container K3s kubeconfig) and **`HOME=/root`**. Submit verify also receives **`ANSWER`** set to the submitted string exactly as sent (for **`single_choice`**, that is always one of the **`options`** strings verbatim). **`observe`** checks do not set **`ANSWER`**.
 
-The **browser terminal** starts in **`/root`** by default, or **`K3SLAB_TERMINAL_CWD`** after a lab is selected (set to that lab’s directory) so `kubectl apply -f manifests/...` paths match the workshop tree.
+The **browser terminal** starts in **`/root`** by default, or **`K3SLAB_TERMINAL_CWD`** after a lab is selected (set to that lab’s directory) so `kubectl apply -f manifests/...` paths match the workshop tree. The prompt is colorized, e.g. `root:/lab/02-deployment-basics#` (green user, blue path).
 
 ### Timeouts (engine defaults)
 
