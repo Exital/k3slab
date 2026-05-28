@@ -167,8 +167,11 @@ tabs:
         test "$ANSWER" = "$expected"
       solution_answer_script: |
         set -e
-        for i in $(seq 1 30); do
-          flag=$(curl -sf -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | jq -r '.flag // empty') || true
+        # CI can be slower after lab switching/reset; gate on controller/app readiness first.
+        kubectl wait --namespace ingress-nginx --for=condition=ready pod -l app.kubernetes.io/component=controller --timeout=120s >/dev/null 2>&1 || true
+        kubectl wait --for=condition=available deploy/simple-ctf --timeout=120s >/dev/null 2>&1 || true
+        for i in $(seq 1 90); do
+          flag=$(curl -sS --max-time 2 -f -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | jq -r '.flag // empty') || true
           if test -n "$flag"; then
             printf '%s\n' "$flag"
             exit 0
