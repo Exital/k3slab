@@ -182,7 +182,7 @@ write_reports() {
     echo '}'
   } > "${js}"
 
-  if [[ -n "${GITHUB_STEP_SUMMARY:-}" && -f "${md}" ]]; then
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" && -f "${md}" && -d "$(dirname "${GITHUB_STEP_SUMMARY}")" ]]; then
     cat "${md}" >> "${GITHUB_STEP_SUMMARY}"
   fi
 }
