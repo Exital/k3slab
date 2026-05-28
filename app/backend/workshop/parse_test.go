@@ -238,3 +238,32 @@ tabs:
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestParseSolutionFields(t *testing.T) {
+	yaml := `
+name: Test
+tabs:
+  steps:
+    - id: q1
+      type: question
+      title: Q
+      answer_type: text
+      verify: 'true'
+      solution_answer: "42"
+      solution_script: echo setup
+`
+	w, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := w.Steps[0]
+	if st.SolutionAnswer != "42" {
+		t.Fatalf("solution_answer: %q", st.SolutionAnswer)
+	}
+	if st.SolutionScript != "echo setup" {
+		t.Fatalf("solution_script: %q", st.SolutionScript)
+	}
+	if !st.HasSolution() {
+		t.Fatal("expected HasSolution")
+	}
+}

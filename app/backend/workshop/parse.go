@@ -46,6 +46,9 @@ type rawStep struct {
 	Hints                []string `yaml:"hints"`
 	PollIntervalSeconds  int      `yaml:"poll_interval_seconds"`
 	Run                  string   `yaml:"run"`
+	SolutionAnswer       string   `yaml:"solution_answer"`
+	SolutionScript       string   `yaml:"solution_script"`
+	SolutionAnswerScript string   `yaml:"solution_answer_script"`
 }
 
 // Parse loads workshop YAML into a Workshop.
@@ -210,6 +213,9 @@ func normalizeQuestion(rs rawStep, id string) (Step, error) {
 		Setup:            setup,
 		Verify:           strings.TrimSpace(rs.Verify),
 		Hints:            rs.Hints,
+		SolutionAnswer:       strings.TrimSpace(rs.SolutionAnswer),
+		SolutionScript:       strings.TrimSpace(rs.SolutionScript),
+		SolutionAnswerScript: strings.TrimSpace(rs.SolutionAnswerScript),
 	}
 	if at == AnswerObserve {
 		st.PollIntervalSeconds = rs.PollIntervalSeconds

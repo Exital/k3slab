@@ -9,6 +9,7 @@ import (
 
 	"k3slab/cluster"
 	"k3slab/exposure"
+	"k3slab/labtest"
 	"k3slab/loghub"
 	"k3slab/labs"
 	"k3slab/server"
@@ -32,6 +33,10 @@ func main() {
 			log.Fatal(err)
 		}
 		return
+	}
+
+	if len(os.Args) >= 2 && os.Args[1] == "lab-test" {
+		os.Exit(labtest.Main(os.Args[2:]))
 	}
 
 	hub := loghub.New()

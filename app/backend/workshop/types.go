@@ -1,5 +1,7 @@
 package workshop
 
+import "strings"
+
 // StepType identifies workshop step kinds.
 type StepType string
 
@@ -38,6 +40,17 @@ type Step struct {
 	Hints                 []string   `json:"hints,omitempty"`
 	PollIntervalSeconds   int        `json:"poll_interval_seconds,omitempty"` // observe only
 	Run                   string     `json:"-"`
+	// Author/CI only — not exposed via learner API.
+	SolutionAnswer       string `json:"-"`
+	SolutionScript       string `json:"-"` // setup actions; stdout is not used as the answer
+	SolutionAnswerScript string `json:"-"` // prints the answer on stdout (lab-test only)
+}
+
+// HasSolution reports whether lab-test should exercise this question.
+func (s Step) HasSolution() bool {
+	return strings.TrimSpace(s.SolutionAnswer) != "" ||
+		strings.TrimSpace(s.SolutionScript) != "" ||
+		strings.TrimSpace(s.SolutionAnswerScript) != ""
 }
 
 // SetupCommand is one question setup command entry.

@@ -355,6 +355,53 @@ func (e *Engine) CheckQuestion(ctx context.Context) (ok bool, logs string, err e
 	return ok, e.lastVerify.String(), nil
 }
 
+// SkipCurrentStep advances without verifying (lab-test: questions without solution_*).
+func (e *Engine) SkipCurrentStep() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.loadErr != nil {
+		return e.loadErr
+	}
+	if e.w == nil {
+		return errors.New("no workshop loaded")
+	}
+	if e.current >= len(e.w.Steps) {
+		return errors.New("workshop complete")
+	}
+	e.current++
+	e.lastSetup.Reset()
+	e.lastVerify.Reset()
+	e.lastTaskOut.Reset()
+	return nil
+}
+
+// RunSolutionScript runs an author-provided solution script in the lab root (lab-test only).
+func (e *Engine) RunSolutionScript(ctx context.Context, script string) (logs string, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	st, err := e.currentStep()
+	if err != nil {
+		return "", err
+	}
+	if st.Type != workshop.StepQuestion {
+		return "", fmt.Errorf("current step is not a question")
+	}
+	if !e.setupDone[e.current] {
+		return "", fmt.Errorf("setup not completed for this question")
+	}
+	var buf strings.Builder
+	ctx, cancel := context.WithTimeout(ctx, setupTimeout)
+	defer cancel()
+	code, err := e.runShellWithEnv(ctx, script, &buf, nil, e.kubeEnv())
+	if err != nil {
+		return buf.String(), err
+	}
+	if code != 0 {
+		return buf.String(), fmt.Errorf("solution_script exited with code %d", code)
+	}
+	return buf.String(), nil
+}
+
 // AdvanceQuestion moves to the next step after the current question was verified correct.
 func (e *Engine) AdvanceQuestion() error {
 	e.mu.Lock()

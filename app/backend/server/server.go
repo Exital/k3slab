@@ -67,6 +67,11 @@ func New(labMgr *labs.Manager, hub *loghub.Hub, watcher *exposure.Watcher, clust
 	return s, nil
 }
 
+// Handler returns the HTTP handler (for tests and mounting).
+func (s *Server) Handler() http.Handler {
+	return withLogging(s.mux)
+}
+
 // Run starts the HTTP server.
 func (s *Server) Run() error {
 	addr := strings.TrimSpace(os.Getenv("K3SLAB_LISTEN"))
@@ -77,7 +82,7 @@ func (s *Server) Run() error {
 	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           withLogging(s.mux),
+		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Printf("listening on %s", addr)
