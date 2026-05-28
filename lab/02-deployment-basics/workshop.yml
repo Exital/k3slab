@@ -29,6 +29,9 @@ tabs:
         kubectl get svc simple-ctf-svc &>/dev/null
         kubectl get ingress simple-ctf-ingress &>/dev/null
         kubectl get cm simple-ctf-entrypoint &>/dev/null
+      solution_script: |
+        kubectl apply -f manifests/
+        kubectl config set-context --current --namespace=deployment-basics
       hints:
         - "From the lab directory: `kubectl apply -f manifests/` (not `manifests/*` — use the directory path)"
         - "If some objects failed with **namespace not found**, run `kubectl apply -f manifests/` again (namespace is applied first via `00-namespace.yml`)"
@@ -60,6 +63,15 @@ tabs:
           -H "Authorization: Bearer $(curl -sf 'https://ghcr.io/token?scope=repository:exital/simple-ctf:pull' | jq -r .token)" \
           https://ghcr.io/v2/exital/simple-ctf/tags/list | jq -r '.tags[]')
         echo "$tags" | grep -qxF "$tag"
+      solution_script: |
+        token=$(curl -sf 'https://ghcr.io/token?scope=repository:exital/simple-ctf:pull' | jq -r .token)
+        tags=$(curl -sf -H "Authorization: Bearer ${token}" https://ghcr.io/v2/exital/simple-ctf/tags/list | jq -r '.tags[]')
+        if echo "$tags" | grep -qxF latest; then
+          tag=latest
+        else
+          tag=$(echo "$tags" | head -1)
+        fi
+        kubectl set image deploy/simple-ctf simple-ctf=ghcr.io/exital/simple-ctf:${tag}
       hints:
         - "`kubectl describe deploy simple-ctf`"
         - "List published tags: `curl -s -H \"Authorization: Bearer $(curl -sf 'https://ghcr.io/token?scope=repository:exital/simple-ctf:pull' | jq -r .token)\" https://ghcr.io/v2/exital/simple-ctf/tags/list | jq -r '.tags[]'`"
@@ -83,6 +95,8 @@ tabs:
         test -n "$pod"
         kubectl get pod "$pod" -o jsonpath='{.status.phase}' | grep -qx Running
         kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].ready}' | grep -qx true
+      solution_script: |
+        kubectl set env deploy/simple-ctf CTF_RELAY_MODE=active
       hints:
         - "`kubectl logs -l app=simple-ctf --tail=50`"
         - "`kubectl set env deploy/simple-ctf CTF_RELAY_MODE=active`"
@@ -103,6 +117,8 @@ tabs:
         test "$sel" = "simple-ctf"
         ip=$(kubectl get endpoints simple-ctf-svc -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null)
         test -n "$ip"
+      solution_script: |
+        kubectl patch svc simple-ctf-svc --type=json -p '[{"op":"replace","path":"/spec/selector","value":{"app":"simple-ctf"}}]'
       hints:
         - "`kubectl get deploy simple-ctf --show-labels`"
         - "`kubectl edit svc simple-ctf-svc`"
@@ -123,6 +139,9 @@ tabs:
         test "$svc" = "simple-ctf-svc"
         port=$(kubectl get ingress simple-ctf-ingress -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.port.number}' 2>/dev/null)
         test "$port" = "3000"
+      solution_script: |
+        kubectl patch ingress simple-ctf-ingress --type=json \
+          -p '[{"op":"replace","path":"/spec/rules/0/http/paths/0/backend/service/name","value":"simple-ctf-svc"}]'
       hints:
         - "`kubectl get ingress simple-ctf-ingress -o yaml`"
         - "`kubectl get svc`"
@@ -146,6 +165,17 @@ tabs:
         expected=$(curl -sf -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | jq -r .flag)
         test -n "$expected"
         test "$ANSWER" = "$expected"
+      solution_answer_script: |
+        set -e
+        for i in $(seq 1 30); do
+          flag=$(curl -sf -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | jq -r '.flag // empty') || true
+          if test -n "$flag"; then
+            printf '%s\n' "$flag"
+            exit 0
+          fi
+          sleep 1
+        done
+        exit 1
       hints:
         - "`curl -s -H 'Host: localhost' http://127.0.0.1/ctf/api/flag`"
         - "Terminal header may show an **Open in browser** tab for `localhost/ctf`"

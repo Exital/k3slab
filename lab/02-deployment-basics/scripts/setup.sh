@@ -9,9 +9,11 @@ helm repo update ingress-nginx >/dev/null 2>&1 || true
 helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
   --namespace ingress-nginx --create-namespace \
   --wait --timeout 10m \
+  --set controller.replicaCount=1 \
   --set controller.hostNetwork=true \
   --set controller.dnsPolicy=ClusterFirstWithHostNet \
   --set controller.service.type=ClusterIP \
+  --set controller.updateStrategy.type=Recreate \
   --set controller.ingressClassResource.name=nginx \
   --set controller.ingressClassResource.default=true \
   --set controller.admissionWebhooks.enabled=false \

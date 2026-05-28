@@ -19,6 +19,7 @@ tabs:
         Correct — this lab runs a single-node **K3s** cluster, so you should see **1** Ready node.
       verify: |
         test "$ANSWER" = "1"
+      solution_answer: "1"
       hints:
         - "Try `kubectl get nodes`"
         - "Count rows whose STATUS contains Ready"
@@ -34,6 +35,7 @@ tabs:
         Right — workloads for this lab live in **`kubectl-basics`**.
       verify: |
         test "$ANSWER" = "kubectl-basics"
+      solution_answer: "kubectl-basics"
       hints:
         - "Run `kubectl get namespaces`"
         - "Look for a namespace that is not default, kube-system, or kube-public"
@@ -49,6 +51,7 @@ tabs:
         Correct — the web app Deployment is named **`web`**.
       verify: |
         test "$ANSWER" = "web"
+      solution_answer: "web"
       hints:
         - "Try `kubectl get deployments -n kubectl-basics`"
         - "The name is short — four letters"
@@ -64,6 +67,7 @@ tabs:
         Correct — **web** runs **2** ready replicas.
       verify: |
         test "$ANSWER" = "2"
+      solution_answer: "2"
       hints:
         - "`kubectl get deploy web -n kubectl-basics`"
         - "Check READY column (e.g. 2/2)"
@@ -79,6 +83,7 @@ tabs:
         Correct — the Service is **`web-svc`**.
       verify: |
         test "$ANSWER" = "web-svc"
+      solution_answer: "web-svc"
       hints:
         - "Try `kubectl get svc -n kubectl-basics`"
         - "Name ends with -svc"
@@ -94,6 +99,7 @@ tabs:
         Correct — **web-svc** exposes port **80**.
       verify: |
         test "$ANSWER" = "80"
+      solution_answer: "80"
       hints:
         - "`kubectl get svc web-svc -n kubectl-basics`"
         - "Standard HTTP port"
@@ -109,6 +115,7 @@ tabs:
         Correct — the logger prints **`k3slab-log-ok`**.
       verify: |
         test "$ANSWER" = "k3slab-log-ok"
+      solution_answer: "k3slab-log-ok"
       hints:
         - "`kubectl get pods -n kubectl-basics -l app=logger`"
         - "`kubectl logs <pod-name> -n kubectl-basics`"
@@ -127,6 +134,7 @@ tabs:
         Right — **`kubectl get pods -A`** (or `--all-namespaces`) lists pods in every namespace.
       verify: |
         test "$ANSWER" = "kubectl get pods -A"
+      solution_answer: "kubectl get pods -A"
       hints:
         - "The `-A` flag means all namespaces"
 
