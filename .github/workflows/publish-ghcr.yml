@@ -16,7 +16,37 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build test image
+        run: docker build -f docker/Dockerfile --target tests -t k3slab-tests .
+
+      - name: Run tests
+        env:
+          GITHUB_STEP_SUMMARY: ${{ github.step_summary }}
+        run: |
+          mkdir -p reports
+          docker run --rm --privileged -p 80:80 \
+            -e K3SLAB_TEST_REPORT_DIR=/reports \
+            -e GITHUB_ACTIONS=true \
+            -e GITHUB_STEP_SUMMARY \
+            -v "${{ github.workspace }}/reports:/reports" \
+            k3slab-tests
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: reports/
+          if-no-files-found: ignore
+
   build-push:
+    needs: [tests]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

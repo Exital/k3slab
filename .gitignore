@@ -5,6 +5,7 @@ app/frontend/dist/
 # Go build artifacts (binary name may vary)
 /k3slab
 app/backend/k3slab
+app/backend/tmp/k3slab-dev
 *.exe
 *.exe~
 *.dll

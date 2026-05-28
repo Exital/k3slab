@@ -98,6 +98,34 @@ ENV K3SLAB_CLUSTER_PROFILE=/run/k3slab/cluster-profile.env
 EXPOSE 3010
 ENTRYPOINT ["/usr/local/bin/k3slab-dev-entrypoint"]
 
+# --- CI / local test runner (privileged docker run; not published) ---
+FROM k3s-base AS tests
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=golang:1.23-bookworm /usr/local/go /usr/local/go
+RUN ln -sf /usr/local/go/bin/go /usr/local/bin/go \
+    && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt
+# Node/npm: copy runtime + global modules; rewrite npm/npx shims (symlinks break when cherry-picked).
+COPY --from=node:22-bookworm /usr/local/bin/node /usr/local/bin/node
+COPY --from=node:22-bookworm /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN printf '%s\n' '#!/bin/sh' 'exec node /usr/local/lib/node_modules/npm/bin/npm-cli.js "$@"' > /usr/local/bin/npm \
+    && chmod +x /usr/local/bin/npm \
+    && printf '%s\n' '#!/bin/sh' 'exec node /usr/local/lib/node_modules/npm/bin/npx-cli.js "$@"' > /usr/local/bin/npx \
+    && chmod +x /usr/local/bin/npx
+COPY --from=backend-build /out/k3slab /app/k3slab
+COPY app/backend /src/backend
+COPY app/frontend /src/frontend
+COPY lab /src/lab
+COPY docker/run-tests.sh /usr/local/bin/k3slab-run-tests
+RUN chmod +x /usr/local/bin/k3slab-run-tests
+ENV PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+ENV K3SLAB_BIN=/app/k3slab
+ENV LABS_ROOT=/src/lab
+ENV LAB_ID=01-kubectl-basics
+ENV KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+ENV K3SLAB_K3S_SNAPSHOTTER=native
+ENTRYPOINT ["/usr/local/bin/k3slab-run-tests"]
+
 # --- Production runtime image (default target) ---
 FROM k3s-base AS runtime
 COPY --from=backend-build /out/k3slab /app/k3slab
