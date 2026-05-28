@@ -162,9 +162,11 @@ tabs:
       verify: |
         ready=$(kubectl get deploy simple-ctf -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
         test "$ready" = "1"
+        ingress_ip=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
+        test -n "$ingress_ip"
         expected=""
         for i in $(seq 1 90); do
-          expected=$(curl -sS --max-time 2 -f -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | jq -r '.flag // empty') || true
+          expected=$(curl -sS --max-time 2 -f -H 'Host: localhost' "http://${ingress_ip}/ctf/api/flag" | jq -r '.flag // empty') || true
           if test -n "$expected"; then
             break
           fi
@@ -177,12 +179,11 @@ tabs:
         # CI can be slower after lab switching/reset; gate on controller/app readiness first.
         kubectl wait --namespace ingress-nginx --for=condition=ready pod -l app.kubernetes.io/component=controller --timeout=120s >/dev/null 2>&1 || true
         kubectl wait --for=condition=available deploy/simple-ctf --timeout=120s >/dev/null 2>&1 || true
+        ingress_ip=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.spec.clusterIP}' 2>/dev/null) || true
         for i in $(seq 1 90); do
-          # Derive the answer from the in-cluster service to avoid host-port race in CI.
-          svc_ip=$(kubectl get svc simple-ctf-svc -o jsonpath='{.spec.clusterIP}' 2>/dev/null) || true
           flag=""
-          if test -n "$svc_ip"; then
-            flag=$(curl -sS --max-time 2 -f "http://${svc_ip}:3000/api/flag" | jq -r '.flag // empty') || true
+          if test -n "$ingress_ip"; then
+            flag=$(curl -sS --max-time 2 -f -H 'Host: localhost' "http://${ingress_ip}/ctf/api/flag" | jq -r '.flag // empty') || true
           fi
           if test -n "$flag"; then
             printf '%s\n' "$flag"
