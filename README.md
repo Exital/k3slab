@@ -74,6 +74,96 @@ docker run --rm --name k3slab \
 
 Pin the bundled k9s version at build time: `docker build --build-arg K9S_VERSION=v0.50.18 -f docker/Dockerfile -t k3slab:latest .` (default `v0.50.18`). Supported platforms: **linux/amd64** and **linux/arm64** (same as the K3s binary).
 
+### Running tests
+
+All tests run inside a dedicated Docker image (`tests` target). You need Docker and permission to run **privileged** containers (K3s lab E2E).
+
+```bash
+make test
+```
+
+This builds the test image, runs backend unit tests, integration tests, a frontend production build, and lab E2E (`k3slab lab-test`) against the bundled labs. A summary table is printed at the end. Reports are written to the `k3slab-test-reports` Docker volume (inspect with `docker run --rm -v k3slab-test-reports:/reports alpine ls /reports`).
+
+Run only lab E2E for one lab (faster iteration):
+
+```bash
+make test-lab LAB=01-kubectl-basics
+```
+
+#### Optional lab test fields (authors)
+
+On **question** steps in `workshop.yml`, you can add optional **author-only** fields for `k3slab lab-test` (and `make test`). They are **not** exposed to learners in the UI.
+
+If a question has none of these fields, `lab-test` **skips** it.
+
+| Field | Purpose |
+|-------|---------|
+| **`solution_answer`** | Static answer string, passed to **`verify`** as **`ANSWER`** (same as a learner submit). Use `regex:...` when **`verify`** expects a pattern. |
+| **`solution_script`** | Shell run **after setup** to fix or prepare cluster state. **Stdout is not used as the answer** — safe for noisy commands (`kubectl`, `echo`, etc.). |
+| **`solution_answer_script`** | Separate shell whose **stdout** is the answer. Use when the answer is dynamic (e.g. fetch a flag from an API). Only non-stderr output is captured. |
+
+**How `lab-test` runs a text question:**
+
+1. Run workshop **setup** (same as the UI).
+2. Run **`solution_script`** if set (output ignored for grading).
+3. Resolve the answer: **`solution_answer`** if set, otherwise run **`solution_answer_script`** and use its stdout.
+4. Call **`verify`** with **`ANSWER`** set to that value (same path as **`POST /api/question/submit`**).
+
+For **`answer_type: observe`**, only **`solution_script`** is typical (cluster fixes); **`lab-test`** then polls **`verify`** until it passes, like the UI observe loop. Use **`solution_answer`** / **`solution_answer_script`** only for **`text`** or **`single_choice`**.
+
+**Examples**
+
+Fixed text answer:
+
+```yaml
+- id: question-nodes
+  type: question
+  answer_type: text
+  verify: |
+    test "$ANSWER" = "1"
+  solution_answer: "1"
+```
+
+Cluster prep only (observe):
+
+```yaml
+- id: question-service-selector
+  type: question
+  answer_type: observe
+  verify: |
+    # ...
+  solution_script: |
+    kubectl patch svc my-svc --type=json -p '[...]'
+```
+
+Dynamic answer (flag from HTTP):
+
+```yaml
+- id: question-flag-ready
+  type: question
+  answer_type: text
+  verify: |
+    expected=$(curl -sf -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | jq -r .flag)
+    test "$ANSWER" = "$expected"
+  solution_answer_script: |
+    set -e
+    curl -sf -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | jq -r .flag
+```
+
+Setup plus dynamic answer (both scripts):
+
+```yaml
+solution_script: |
+  echo "Applying fixes..."
+  kubectl patch svc my-svc --type=json -p '[...]'
+solution_answer_script: |
+  curl -sf -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | jq -r .flag
+```
+
+`make test-lab` mounts your **`lab/`** tree read-only (`:ro`); do not rely on writing files under the lab directory from solution scripts. Use **`solution_answer_script`** stdout instead.
+
+Tag releases run the same test image in GitHub Actions before publishing to GHCR (see [.github/workflows/publish-ghcr.yml](.github/workflows/publish-ghcr.yml)).
+
 ### Development (containerized hot reload)
 
 For local development, use the dev-only compose stack:
@@ -264,6 +354,9 @@ After setup finishes, the learner submits an answer; the **`verify`** script dec
 | `hints` | No | List of strings. The UI reveals them **one at a time** when the learner clicks “Show next hint”. |
 | `incorrect_message` | No | Markdown shown when verify fails **instead of** the generic default wrong-answer panel. Omit to use the built-in copy. The panel stays until the learner dismisses it with **×**; if they submit another wrong answer after dismissing it, the panel appears again. |
 | `correct_message` | No | Markdown shown after a correct verify. Optional; omit for no extra panel (the short “Correct!” banner still appears). The panel stays until dismissed with **×** or the learner clicks **Next question**. |
+| `solution_answer` | No | **Lab-test only.** Static answer for `k3slab lab-test` (see [Optional lab test fields](#optional-lab-test-fields-authors)). |
+| `solution_script` | No | **Lab-test only.** Shell to prepare cluster state; stdout is **not** the answer. |
+| `solution_answer_script` | No | **Lab-test only.** Shell whose stdout is submitted as **`ANSWER`** (for dynamic values). |
 
 ### `setup` shape
 
