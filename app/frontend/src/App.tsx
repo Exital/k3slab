@@ -24,6 +24,7 @@ import { MarkdownContent } from "./components/MarkdownContent";
 import { MIcon } from "./components/MIcon";
 import { useExposedEndpoints } from "./hooks/useExposedEndpoints";
 import { useTerminalDetach } from "./hooks/useTerminalDetach";
+import { useTerminalSession } from "./terminal/session";
 import { TerminalView } from "./terminal/TerminalView";
 import type { ThemeMode } from "./theme";
 import { playVerifyTone } from "./playTone";
@@ -178,7 +179,9 @@ export default function App({ theme, setTheme }: AppProps) {
   const clusterReady = clusterStatus === "ready";
   const exposedEndpoints = useExposedEndpoints();
   const { detached, detach, dock, popupBlocked } = useTerminalDetach();
+  const { reconnectTerminal } = useTerminalSession();
   const autoKey = useRef<string>("");
+  const prevLabIdRef = useRef<string | undefined>(undefined);
   const checkInFlight = useRef(false);
   const observePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -266,6 +269,15 @@ export default function App({ theme, setTheme }: AppProps) {
     },
     [catalog?.activeId, resetWorkshopUI, state],
   );
+
+  useEffect(() => {
+    const labId = state?.labId;
+    if (!labId) return;
+    if (prevLabIdRef.current !== labId) {
+      reconnectTerminal();
+      prevLabIdRef.current = labId;
+    }
+  }, [reconnectTerminal, state?.labId]);
 
   const initialLoadDone = useRef(false);
   useEffect(() => {

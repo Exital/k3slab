@@ -17,9 +17,11 @@ import (
 
 const terminalBashRC = "/usr/local/lib/k3slab/terminal-bashrc.sh"
 
-// terminalStartDir is the shell's initial working directory (not LAB_ROOT).
-// Override with K3SLAB_TERMINAL_CWD if needed.
-func terminalStartDir() string {
+// terminalStartDir is the shell's initial working directory for new PTY sessions.
+func (s *Server) terminalStartDir() string {
+	if root := s.labMgr.ActiveLabRoot(); root != "" {
+		return root
+	}
 	if d := strings.TrimSpace(os.Getenv("K3SLAB_TERMINAL_CWD")); d != "" {
 		return d
 	}
@@ -55,7 +57,7 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 	// --rcfile loads the k3slab prompt on the first line (bash -i alone may skip ~/.bashrc in a PTY).
 	cmd := exec.Command("bash", "--rcfile", terminalBashRC, "-i")
 	// Do not start in the lab tree so a casual `ls` does not expose workshop scripts.
-	cmd.Dir = terminalStartDir()
+	cmd.Dir = s.terminalStartDir()
 	cmd.Env = terminalEnv()
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setsid: true,

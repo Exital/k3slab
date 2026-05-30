@@ -99,7 +99,7 @@ function TerminalViewSession({ theme, active }: { theme: ThemeMode; active: bool
       unsub();
       term.dispose();
     };
-  }, [theme, active, session]);
+  }, [theme, active, session, session.connectionGeneration]);
 
   return <TerminalViewContainer ref={containerRef} theme={theme} />;
 }

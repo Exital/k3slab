@@ -1,8 +1,22 @@
-.PHONY: test test-lab test-build
+.PHONY: test test-lab test-build run run-build
 
 IMAGE ?= k3slab-tests
+RUN_IMAGE ?= k3slab:latest
+CONTAINER ?= k3slab
 DOCKERFILE := docker/Dockerfile
 REPORT_VOL := k3slab-test-reports
+
+run-build:
+	docker build -f $(DOCKERFILE) -t $(RUN_IMAGE) .
+
+run: run-build
+	docker run --rm --name $(CONTAINER) \
+		--privileged \
+		--cgroupns=host \
+		-p 3010:3010 \
+		-p 80:80 \
+		-e k9s_enable=true \
+		$(RUN_IMAGE)
 
 test-build:
 	docker build -f $(DOCKERFILE) --target tests -t $(IMAGE) .

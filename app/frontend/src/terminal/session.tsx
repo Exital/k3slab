@@ -23,6 +23,10 @@ type TerminalSessionValue = {
   sendInput: (data: string) => void;
   sendResize: (cols: number, rows: number) => void;
   publishTheme: (theme: ThemeMode) => void;
+  /** Open a fresh PTY (e.g. after switching labs so cwd matches the active lab). */
+  reconnectTerminal: () => void;
+  /** Bumps when reconnectTerminal opens a new backend shell. */
+  connectionGeneration: number;
 };
 
 const TerminalSessionContext = createContext<TerminalSessionValue | null>(null);
@@ -40,6 +44,7 @@ type TerminalSessionProviderProps = {
 
 export function TerminalSessionProvider({ theme, children }: TerminalSessionProviderProps) {
   const [status, setStatus] = useState<TerminalStatus>("connecting");
+  const [connectionGeneration, setConnectionGeneration] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const bufferChunksRef = useRef<Uint8Array[]>([]);
   const bufferSizeRef = useRef(0);
@@ -105,6 +110,12 @@ export function TerminalSessionProvider({ theme, children }: TerminalSessionProv
     },
     [postToPopout],
   );
+
+  const reconnectTerminal = useCallback(() => {
+    bufferChunksRef.current = [];
+    bufferSizeRef.current = 0;
+    setConnectionGeneration((g) => g + 1);
+  }, []);
 
   const handlePopoutMessage = useCallback(
     (msg: TerminalChannelMessage) => {
@@ -182,7 +193,7 @@ export function TerminalSessionProvider({ theme, children }: TerminalSessionProv
       ws.close();
       wsRef.current = null;
     };
-  }, [notifyOutput, postToPopout]);
+  }, [notifyOutput, postToPopout, connectionGeneration]);
 
   useEffect(() => {
     const onBeforeUnload = () => {
@@ -205,8 +216,19 @@ export function TerminalSessionProvider({ theme, children }: TerminalSessionProv
       sendInput,
       sendResize,
       publishTheme,
+      reconnectTerminal,
+      connectionGeneration,
     }),
-    [status, subscribeOutput, getReplayBuffer, sendInput, sendResize, publishTheme],
+    [
+      status,
+      subscribeOutput,
+      getReplayBuffer,
+      sendInput,
+      sendResize,
+      publishTheme,
+      reconnectTerminal,
+      connectionGeneration,
+    ],
   );
 
   return <TerminalSessionContext.Provider value={value}>{children}</TerminalSessionContext.Provider>;
