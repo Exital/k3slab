@@ -8,20 +8,20 @@ tabs:
   steps:
     - id: question-deploy-manifests
       type: question
-      title: Deploy the lab manifests
+      title: Deploy the CTF challenge
       description: |
-        A background setup task is starting now to install **ingress-nginx** for this lab. You can continue with the deployment tasks while it is provisioning.
+        Your team is putting on a **capture-the-flag** challenge — they need you to get the app into the cluster.
 
-        Deploy the lab stack from the **`manifests/`** directory in this lab folder using **`kubectl apply`** (you choose flags such as `-f` and the path — the full command is not given here).
-
-        This step completes automatically once the namespace and workloads are present in the cluster.
+        The manifests are in **`/lab/02-deployment-basics/manifests`**. Use **`kubectl apply`** to apply the whole directory.
       answer_type: observe
       poll_interval_seconds: 5
       setup:
         - run: bash scripts/setup.sh
           background: true
       correct_message: |
-        Lab manifests are applied in namespace **`deployment-basics`**. Your shell context now uses that namespace by default, so you can omit **`-n deployment-basics`** in **`kubectl`** commands.
+        Challenge manifests are deployed. Your default namespace is now **`deployment-basics`** — you can omit **`-n`** in **`kubectl`** commands.
+
+        Oh no — the deployment is broken. We’re going to need your help to recover from this disaster.
       verify: |
         kubectl get ns deployment-basics &>/dev/null
         kubectl config set-context --current --namespace=deployment-basics &>/dev/null
@@ -33,24 +33,22 @@ tabs:
         kubectl apply -f manifests/
         kubectl config set-context --current --namespace=deployment-basics
       hints:
-        - "From the lab directory: `kubectl apply -f manifests/` (not `manifests/*` — use the directory path)"
-        - "If some objects failed with **namespace not found**, run `kubectl apply -f manifests/` again (namespace is applied first via `00-namespace.yml`)"
+        - "`kubectl apply -f <dir>/` applies every manifest in that directory (e.g. `-f /lab/02-deployment-basics/manifests/` — use the directory path, not `manifests/*`)"
+        - "If some objects failed with **namespace not found**, run apply again (namespace is created first via `00-namespace.yml`)"
         - "`kubectl get deploy,svc,ingress`"
-        - "Ingress uses class **`nginx`**; the lab starts ingress-nginx setup in the background, so wait until controller pods are ready if ingress checks fail early"
+        - "Ingress uses class **`nginx`**; ingress-nginx installs in the background — wait for controller pods if ingress checks fail early"
 
     - id: question-image-tag
       type: question
       title: Fix the container image tag
       description: |
-        The Deployment cannot pull the application image with the broken tag in the manifest.
+        Quick update from the team: pods are stuck — **`kubectl get pods`** will probably show **ImagePullBackOff**. The manifest uses an image tag that does not exist on the registry.
 
-        Pick a **valid tag** for [simple-ctf on GitHub Container Registry](https://github.com/Exital/simple-ctf/pkgs/container/simple-ctf) (`ghcr.io/exital/simple-ctf`) and update the Deployment image.
-
-        This step completes automatically once the Deployment uses a tag that exists in the registry.
+        Find a tag that actually exists for **`ghcr.io/exital/simple-ctf`** and fix the Deployment image. This step completes automatically once the cluster is pulling a real tag.
       answer_type: observe
       poll_interval_seconds: 5
       correct_message: |
-        The Deployment image uses a valid **`ghcr.io/exital/simple-ctf`** tag.
+        Yes — you picked a real tag and the image is pulling successfully. The team can breathe again.
       verify: |
         img=$(kubectl get deploy simple-ctf -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)
         case "$img" in
@@ -73,21 +71,21 @@ tabs:
         fi
         kubectl set image deploy/simple-ctf simple-ctf=ghcr.io/exital/simple-ctf:${tag}
       hints:
-        - "`kubectl describe deploy simple-ctf`"
-        - "List published tags: `curl -s -H \"Authorization: Bearer $(curl -sf 'https://ghcr.io/token?scope=repository:exital/simple-ctf:pull' | jq -r .token)\" https://ghcr.io/v2/exital/simple-ctf/tags/list | jq -r '.tags[]'`"
+        - "`kubectl describe deploy simple-ctf` — look for pull errors on the image"
+        - "See which tags are published on the [simple-ctf package page](https://github.com/Exital/simple-ctf/pkgs/container/simple-ctf) on GitHub"
         - "`kubectl set image deploy/simple-ctf simple-ctf=ghcr.io/exital/simple-ctf:<tag>`"
 
     - id: question-env-value
       type: question
-      title: Required value for CTF_RELAY_MODE
+      title: Unexpected pod logs
       description: |
-        After the image pulls, pods may still crash. Read **pod logs** from the lab entrypoint script, then set **`CTF_RELAY_MODE`** on the Deployment to the value the logs require.
+        The image is pulling now, but the CTF pod still will not stay up — the logs do not look right.
 
-        This step completes automatically once the variable is set correctly and the container is **Running** and **ready**.
+        Check the **CTF pod logs**, see what is causing the issue, and fix the Deployment.
       answer_type: observe
       poll_interval_seconds: 5
       correct_message: |
-        **`CTF_RELAY_MODE=active`** — the app entrypoint can generate a FLAG and start the server.
+        You did it — the pod is **Running** and the app came up. Whatever was in those logs is fixed; the challenge is alive again.
       verify: |
         val=$(kubectl get deploy simple-ctf -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="CTF_RELAY_MODE")].value}' 2>/dev/null)
         test "$val" = "active"
@@ -103,15 +101,15 @@ tabs:
 
     - id: question-service-selector
       type: question
-      title: Service selector label
+      title: Traffic isn't reaching the app
       description: |
-        The **Service** must route traffic to the Deployment pods. Check `kubectl get svc,endpoints` and fix the selector.
+        The pod is healthy, but the team still cannot reach the challenge from inside the cluster.
 
-        This step completes automatically once the Service has endpoints backing it.
+        Run **`kubectl get svc,endpoints`** — the Service may have **no endpoints** even though the CTF pod is running. Something in the manifest is not wiring traffic to the right pods; fix it so the Service can send traffic to the app.
       answer_type: observe
       poll_interval_seconds: 5
       correct_message: |
-        Service selector matches **`app=simple-ctf`** and endpoints are populated.
+        Nice — the Service is pointing at the CTF pods again. Traffic can actually reach the app inside the cluster.
       verify: |
         sel=$(kubectl get svc simple-ctf-svc -o jsonpath='{.spec.selector.app}' 2>/dev/null)
         test "$sel" = "simple-ctf"
@@ -120,20 +118,21 @@ tabs:
       solution_script: |
         kubectl patch svc simple-ctf-svc --type=json -p '[{"op":"replace","path":"/spec/selector","value":{"app":"simple-ctf"}}]'
       hints:
-        - "`kubectl get deploy simple-ctf --show-labels`"
+        - "`kubectl get deploy simple-ctf --show-labels` — compare pod labels to what the Service is looking for"
+        - "`kubectl get endpoints simple-ctf-svc`"
         - "`kubectl edit svc simple-ctf-svc`"
 
     - id: question-ingress-backend
       type: question
-      title: Ingress backend service name
+      title: Players still can't reach the challenge
       description: |
-        The **Ingress** must point at the correct **Service** name on port 3000. The NGINX rewrite annotations (strip **`/ctf`** so the app sees **`/`**, not **`/ctf`**) are already configured.
+        In-cluster routing works, but players hitting **`http://localhost/ctf/`** still get errors.
 
-        Fix the Ingress backend — this step completes automatically when the Ingress spec is correct.
+        The **Ingress** is supposed to send **`/ctf`** traffic to the app on port **3000** — path rewrites are already set up. Something in the Ingress spec is still wrong; fix it so external traffic reaches the challenge.
       answer_type: observe
       poll_interval_seconds: 5
       correct_message: |
-        Ingress backend is **`simple-ctf-svc`** on port **3000**. The app is exposed at **`http://localhost/ctf/`** (publish **`-p 80:80`** on `docker run`); NGINX rewrites **`/ctf/...`** so the app sees **`/...`** (e.g. `/ctf/api/flag` → `/api/flag`).
+        The Ingress is wired up — **`http://localhost/ctf/`** should work now. NGINX strips **`/ctf`** on the way in so the app sees paths like **`/api/flag`**, not **`/ctf/api/flag`**.
       verify: |
         svc=$(kubectl get ingress simple-ctf-ingress -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.name}' 2>/dev/null)
         test "$svc" = "simple-ctf-svc"
@@ -144,21 +143,21 @@ tabs:
           -p '[{"op":"replace","path":"/spec/rules/0/http/paths/0/backend/service/name","value":"simple-ctf-svc"}]'
       hints:
         - "`kubectl get ingress simple-ctf-ingress -o yaml`"
-        - "`kubectl get svc`"
-        - "Path and rewrite annotations are already set on the Ingress — only the backend **service name** needs fixing"
+        - "`kubectl get svc` — the Ingress backend must match a real Service name"
+        - "Path and rewrite annotations are already on the Ingress — check which **Service** it points at"
 
     - id: question-flag-ready
       type: question
       title: Capture the flag
       description: |
-        Open **`http://localhost/ctf/`** on your machine (with **`-p 80:80`** on `docker run`), or use **`curl`** against **`/ctf/api/flag`**.
+        The challenge is finally online — time to play for real.
 
-        Paste the **flag** value here (e.g. `CTF{...}`).
+        Open **`http://localhost/ctf/`** in your browser, or **`curl`** the flag API at **`/ctf/api/flag`**. Paste the **flag** here (e.g. `CTF{...}`).
       answer_type: text
       correct_message: |
-        Correct — the deployment is healthy and the flag API matches your answer.
+        That's the flag — you recovered the deployment and beat the challenge. Nice work.
       incorrect_message: |
-        That flag does not match **`GET /ctf/api/flag`**. Check the app is reachable (`curl -s -H 'Host: localhost' http://127.0.0.1/ctf/api/flag`) and paste the exact **`flag`** field from the JSON.
+        Not quite — that does not match what the challenge returns. Make sure **`http://localhost/ctf/`** loads (`curl -s -H 'Host: localhost' http://127.0.0.1/ctf/api/flag`) and paste the exact **`flag`** from the JSON.
       verify: |
         ready=$(kubectl get deploy simple-ctf -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
         test "$ready" = "1"
@@ -186,8 +185,8 @@ tabs:
         exit 1
       hints:
         - "`curl -s -H 'Host: localhost' http://127.0.0.1/ctf/api/flag`"
-        - "Terminal header may show an **Open in browser** tab for `localhost/ctf`"
-        - "Submit the flag string only (no JSON wrapper)"
+        - "Terminal header may show an **Open in browser** tab for **`localhost/ctf`**"
+        - "Paste the flag string only — not the full JSON response"
 
   markdowns:
     - id: cheat-sheet
@@ -196,7 +195,7 @@ tabs:
       content: |
         ## Debugging deployments
 
-        - Deploy lab: `kubectl apply -f manifests/` (from the lab directory)
+        - Deploy lab: `kubectl apply -f /lab/02-deployment-basics/manifests/`
         - After the first step, **`deployment-basics`** is the default namespace (no **`-n`** needed)
         - Workloads: `kubectl get deploy,pods,svc,ingress`
         - Events: `kubectl describe deploy simple-ctf`
