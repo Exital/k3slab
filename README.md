@@ -164,33 +164,6 @@ solution_answer_script: |
 
 Tag releases run the same test image in GitHub Actions before publishing to GHCR (see [.github/workflows/publish-ghcr.yml](.github/workflows/publish-ghcr.yml)).
 
-### Development (containerized hot reload)
-
-For local development, use the dev-only compose stack:
-
-```bash
-docker compose -f docker-compose.dev.yml up --build
-```
-
-- Frontend hot reload (Vite): **`http://127.0.0.1:5173`**
-- Backend + K3s runtime: **`http://127.0.0.1:3010`**
-- Ingress app URLs (labs that expose on port 80): **`http://localhost/...`**
-
-This flow is fully separated from the release image while sharing one Dockerfile to reduce drift:
-
-- Dev stack uses [`docker/Dockerfile`](docker/Dockerfile) with **`dev-runtime`** target, plus [`docker/dev-entrypoint.sh`](docker/dev-entrypoint.sh) and [`app/backend/.air.toml`](app/backend/.air.toml).
-- Release image uses the same [`docker/Dockerfile`](docker/Dockerfile) with the default **`runtime`** target and standard command:
-
-```bash
-docker build -f docker/Dockerfile -t k3slab:latest .
-```
-
-Dev compose builds with:
-
-```bash
-docker compose -f docker-compose.dev.yml build
-```
-
 ### Custom labs mount
 
 Labs live under **`LABS_ROOT`** (default **`/lab`**). Each **immediate subdirectory** with a `workshop.yml` is one lab (e.g. `lab/01-kubectl-basics`). The UI lists all labs and lets learners switch (switching resets the cluster).

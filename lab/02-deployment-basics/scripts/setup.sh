@@ -10,9 +10,11 @@ helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
   --namespace ingress-nginx --create-namespace \
   --wait --timeout 10m \
   --set controller.replicaCount=1 \
-  --set controller.hostNetwork=true \
-  --set controller.dnsPolicy=ClusterFirstWithHostNet \
-  --set controller.service.type=ClusterIP \
+  --set controller.hostNetwork=false \
+  --set controller.hostPort.enabled=false \
+  --set controller.service.type=LoadBalancer \
+  --set controller.service.ports.http=80 \
+  --set controller.service.ports.https=443 \
   --set controller.updateStrategy.type=Recreate \
   --set controller.ingressClassResource.name=nginx \
   --set controller.ingressClassResource.default=true \

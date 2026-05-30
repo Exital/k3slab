@@ -87,6 +87,25 @@ killall_k3s() {
   rm -f "${K3SLAB_PID_FILE}"
 }
 
+# Kill workshop/lab processes that can outlive a K3s stop (background setup, helm, ingress).
+kill_lab_orphans() {
+  local pattern
+  local -a patterns=(
+    '[n]ginx-ingress-controller'
+    '[t]raefik traefik'
+    '[/]usr/local/bin/helm'
+    '[s]cripts/setup.sh'
+    'lb-tcp-'
+  )
+  for pattern in "${patterns[@]}"; do
+    pkill -TERM -f "${pattern}" 2>/dev/null || true
+  done
+  sleep 1
+  for pattern in "${patterns[@]}"; do
+    pkill -KILL -f "${pattern}" 2>/dev/null || true
+  done
+}
+
 stop_k3s() {
   killall_k3s
 }
@@ -101,19 +120,121 @@ unmount_k3s_tmpmounts() {
   done
 }
 
-wipe_k3s_data() {
-  local attempt
+# Drop stale containerd sandbox/rootfs mounts under /run/k3s so runtime dirs can be cleared.
+unmount_k3s_runtime() {
+  unmount_k3s_tmpmounts
+  local run_root=/run/k3s/containerd
+  [[ -d "${run_root}" ]] || return 0
+  local m
+  while IFS= read -r -d '' m; do
+    umount -l "${m}" 2>/dev/null || true
+  done < <(find "${run_root}" \( -name rootfs -o -name shm -o -name merged \) -print0 2>/dev/null)
+  while IFS= read -r -d '' m; do
+    umount -l "${m}" 2>/dev/null || true
+  done < <(find "${run_root}" -type d -name snap -print0 2>/dev/null)
+}
+
+_k3slab_iptables_restore_without_k8s() {
+  local save_cmd=( "$1" )
+  local restore_cmd=( "$2" )
+  local table="$3"
+  if ! command -v "${save_cmd[0]}" >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! command -v "${restore_cmd[0]}" >/dev/null 2>&1; then
+    return 0
+  fi
+  if ! "${save_cmd[@]}" -t "${table}" &>/dev/null; then
+    return 0
+  fi
+  "${save_cmd[@]}" -t "${table}" 2>/dev/null \
+    | grep -vE 'KUBE-|CNI-|FLANNEL-' \
+    | "${restore_cmd[@]}" -t "${table}" 2>/dev/null || true
+}
+
+# Remove K3s/CNI/Flannel host networking state so the next cluster boot matches a fresh container.
+reset_k3s_host_networking() {
+  echo "[k3slab] Resetting host networking..."
+  local table iface
+  for table in filter nat mangle raw; do
+    _k3slab_iptables_restore_without_k8s iptables-save iptables-restore "${table}"
+    _k3slab_iptables_restore_without_k8s ip6tables-save ip6tables-restore "${table}"
+  done
+  if command -v conntrack >/dev/null 2>&1; then
+    conntrack -F 2>/dev/null || true
+  fi
+  for iface in cni0 flannel.1; do
+    ip link delete "${iface}" 2>/dev/null || true
+  done
+}
+
+k3slab_dir_is_empty() {
+  local path="$1"
+  [[ ! -e "${path}" ]] && return 0
+  [[ -z "$(ls -A "${path}" 2>/dev/null)" ]]
+}
+
+# Remove a path, or clear its contents when it is a mount point (e.g. docker compose volumes).
+wipe_k3s_path() {
+  local path="$1"
+  [[ -e "${path}" ]] || return 0
+  if mountpoint -q "${path}" 2>/dev/null; then
+    find "${path}" -mindepth 1 -delete 2>/dev/null \
+      || rm -rf "${path:?}"/* "${path:?}"/.[!.]* "${path:?}"/..?* 2>/dev/null \
+      || return 1
+  else
+    rm -rf "${path}" 2>/dev/null || return 1
+  fi
+  k3slab_dir_is_empty "${path}"
+}
+
+k3slab_paths_wiped() {
+  local path
+  for path in "$@"; do
+    if ! k3slab_dir_is_empty "${path}"; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+wipe_k3s_filesystem_state() {
+  local -a required=(
+    "${K3S_DATA_DIR}"
+    /etc/rancher/k3s
+  )
+  local -a optional=(
+    /run/k3s
+    /var/lib/cni
+    /etc/cni/net.d
+  )
+  local attempt path
   for attempt in $(seq 1 10); do
-    unmount_k3s_tmpmounts
-    if rm -rf "${K3S_DATA_DIR}" 2>/dev/null && [[ ! -e "${K3S_DATA_DIR}" ]]; then
+    unmount_k3s_runtime
+    local ok=1
+    for path in "${required[@]}"; do
+      if ! wipe_k3s_path "${path}"; then
+        ok=0
+      fi
+    done
+    for path in "${optional[@]}"; do
+      wipe_k3s_path "${path}" || true
+    done
+    if [[ "${ok}" -eq 1 ]] && k3slab_paths_wiped "${required[@]}"; then
       return 0
     fi
     echo "[k3slab] wipe attempt ${attempt}/10 failed, retrying..."
     killall_k3s
+    kill_lab_orphans
     sleep 2
   done
-  echo "[k3slab] ERROR: could not remove ${K3S_DATA_DIR}"
+  echo "[k3slab] ERROR: could not wipe K3s filesystem state"
   return 1
+}
+
+# Backwards-compatible alias used by older call sites.
+wipe_k3s_data() {
+  wipe_k3s_filesystem_state
 }
 
 restore_k3s_after_reset_failure() {
@@ -145,10 +266,12 @@ wait_ready() {
 reset_cluster() {
   echo "[k3slab] Resetting cluster..."
   stop_k3s
-  if ! wipe_k3s_data; then
+  kill_lab_orphans
+  if ! wipe_k3s_filesystem_state; then
     restore_k3s_after_reset_failure || true
     return 1
   fi
+  reset_k3s_host_networking
   start_k3s >/dev/null
   wait_ready
 }
