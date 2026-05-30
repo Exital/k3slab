@@ -161,14 +161,7 @@ tabs:
       verify: |
         ready=$(kubectl get deploy simple-ctf -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
         test "$ready" = "1"
-        expected=""
-        for i in $(seq 1 90); do
-          expected=$(curl -sS --max-time 2 -f -H 'Host: localhost' 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty') || true
-          if test -n "$expected"; then
-            break
-          fi
-          sleep 1
-        done
+        expected=$(curl -sS --max-time 5 -f -H 'Host: localhost' 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty')
         test -n "$expected"
         test "$ANSWER" = "$expected"
       solution_answer_script: |

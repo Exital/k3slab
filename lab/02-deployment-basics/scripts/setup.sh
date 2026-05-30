@@ -11,14 +11,14 @@ helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
   --wait --timeout 10m \
   --set controller.replicaCount=1 \
   --set controller.hostNetwork=false \
-  --set controller.hostPort.enabled=false \
-  --set controller.service.type=LoadBalancer \
-  --set controller.service.ports.http=80 \
-  --set controller.service.ports.https=443 \
+  --set controller.hostPort.enabled=true \
+  --set controller.hostPort.ports.http=80 \
+  --set controller.service.type=ClusterIP \
+  --set controller.service.enableHttps=false \
   --set controller.updateStrategy.type=Recreate \
+  --set controller.admissionWebhooks.enabled=false \
   --set controller.ingressClassResource.name=nginx \
   --set controller.ingressClassResource.default=true \
-  --set controller.admissionWebhooks.enabled=false \
   --set controller.watchIngressWithoutClass=true
 
 echo "[deployment-basics] ingress-nginx is ready."

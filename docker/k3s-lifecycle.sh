@@ -152,6 +152,23 @@ _k3slab_iptables_restore_without_k8s() {
     | "${restore_cmd[@]}" -t "${table}" 2>/dev/null || true
 }
 
+# CNI hostport rules can outlive deleted pods and hijack :80/:443 on localhost after lab switches.
+flush_stale_cni_hostport() {
+  command -v iptables-save >/dev/null 2>&1 || return 0
+  command -v iptables >/dev/null 2>&1 || return 0
+
+  local chain
+  while IFS= read -r chain; do
+    [[ -n "${chain}" ]] || continue
+    iptables -t nat -F "${chain}" 2>/dev/null || true
+    iptables -t nat -X "${chain}" 2>/dev/null || true
+  done < <(iptables-save -t nat 2>/dev/null | sed -n 's/^:\(CNI-DN-[^ ]*\) .*/\1/p')
+
+  for chain in CNI-HOSTPORT-DNAT CNI-HOSTPORT-MASQ CNI-HOSTPORT-SETMARK; do
+    iptables -t nat -F "${chain}" 2>/dev/null || true
+  done
+}
+
 # Remove K3s/CNI/Flannel host networking state so the next cluster boot matches a fresh container.
 reset_k3s_host_networking() {
   echo "[k3slab] Resetting host networking..."
@@ -160,6 +177,7 @@ reset_k3s_host_networking() {
     _k3slab_iptables_restore_without_k8s iptables-save iptables-restore "${table}"
     _k3slab_iptables_restore_without_k8s ip6tables-save ip6tables-restore "${table}"
   done
+  flush_stale_cni_hostport
   if command -v conntrack >/dev/null 2>&1; then
     conntrack -F 2>/dev/null || true
   fi
