@@ -35,6 +35,16 @@ func main() {
 		return
 	}
 
+	if len(os.Args) >= 2 && os.Args[1] == "render-lab-manifests" {
+		if len(os.Args) != 4 {
+			log.Fatal("usage: k3slab render-lab-manifests <labsRoot> <labId>")
+		}
+		if err := labs.RenderLabManifests(os.Args[2], os.Args[3]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	if len(os.Args) >= 2 && os.Args[1] == "lab-test" {
 		os.Exit(labtest.Main(os.Args[2:]))
 	}

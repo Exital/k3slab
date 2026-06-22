@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     jq \
     bash \
+    gettext-base \
     python3 \
     iptables \
     procps \
@@ -69,11 +70,12 @@ RUN set -eux; \
 WORKDIR /
 
 COPY docker/k3s-lifecycle.sh /usr/local/lib/k3slab/k3s-lifecycle.sh
+COPY docker/render-lab-manifests.sh /usr/local/lib/k3slab/render-lab-manifests.sh
 COPY docker/terminal-bashrc.sh /usr/local/lib/k3slab/terminal-bashrc.sh
 COPY docker/profile.d-k3slab-terminal.sh /etc/profile.d/k3slab-terminal.sh
 COPY docker/cluster-reset.sh /usr/local/bin/k3slab-cluster-reset
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /usr/local/lib/k3slab/k3s-lifecycle.sh /usr/local/bin/k3slab-cluster-reset /entrypoint.sh \
+RUN chmod +x /usr/local/lib/k3slab/k3s-lifecycle.sh /usr/local/lib/k3slab/render-lab-manifests.sh /usr/local/bin/k3slab-cluster-reset /entrypoint.sh \
     && mkdir -p /run/k3slab /var/lib/k3slab \
     && touch /root/.bashrc \
     && ( grep -q 'terminal-bashrc.sh' /root/.bashrc 2>/dev/null || \

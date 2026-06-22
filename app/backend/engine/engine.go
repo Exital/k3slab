@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"k3slab/kube"
+	"k3slab/labmanifest"
 	"k3slab/loghub"
 	"k3slab/workshop"
 )
@@ -253,6 +254,7 @@ func (e *Engine) RunQuestionSetup(ctx context.Context) (logs string, err error) 
 	e.lastSetup.Reset()
 	ctx, cancel := context.WithTimeout(ctx, setupTimeout)
 	defer cancel()
+	_ = labmanifest.RenderDir(e.labRoot)
 	if len(st.Setup) == 0 {
 		e.setupDone[e.current] = true
 		return "", nil

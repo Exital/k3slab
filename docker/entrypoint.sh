@@ -26,6 +26,7 @@ source /usr/local/lib/k3slab/k3s-lifecycle.sh
 
 export LABS_ROOT="${LABS_ROOT:-/lab}"
 export LAB_ID="${LAB_ID:-01-kubectl-basics}"
+export K3SLAB_INGRESS_HOST="${K3SLAB_INGRESS_HOST:-localhost}"
 
 rotate_k3s_log_if_needed() {
   [[ -f "${K3SLAB_K3S_LOG_FILE}" ]] || return 0
@@ -57,6 +58,9 @@ start_k3s_log_rotator() {
   ) &
   K3S_ROTATOR_PID=$!
 }
+
+echo "[k3slab] Rendering lab manifests for ${LAB_ID}..."
+/app/k3slab render-lab-manifests "${LABS_ROOT}" "${LAB_ID}" || true
 
 echo "[k3slab] Starting K3s server..."
 # Inside Docker, nested overlay often fails ("overlayfs snapshotter cannot be enabled...

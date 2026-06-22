@@ -14,6 +14,7 @@ export K3SLAB_INTEGRATION_LABS_ROOT="${K3SLAB_INTEGRATION_LABS_ROOT:-/src/lab}"
 : "${K3SLAB_BIN:=/app/k3slab}"
 : "${LABS_ROOT:=/src/lab}"
 : "${K3SLAB_K3S_SNAPSHOTTER:=native}"
+export K3SLAB_INGRESS_HOST="${K3SLAB_INGRESS_HOST:-localhost}"
 
 # shellcheck source=/dev/null
 source /usr/local/lib/k3slab/k3s-lifecycle.sh

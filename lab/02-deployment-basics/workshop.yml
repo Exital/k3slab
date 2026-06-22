@@ -126,13 +126,13 @@ tabs:
       type: question
       title: Players still can't reach the challenge
       description: |
-        In-cluster routing works, but players hitting **`http://localhost/ctf/`** still get errors.
+        In-cluster routing works, but players hitting the CTF URL (see **Open in browser** in the terminal bar, or **`http://<ingress-host>/ctf/`**) still get errors.
 
         The **Ingress** is supposed to send **`/ctf`** traffic to the app on port **3000** — path rewrites are already set up. Something in the Ingress spec is still wrong; fix it so external traffic reaches the challenge.
       answer_type: observe
       poll_interval_seconds: 5
       correct_message: |
-        The Ingress is wired up — **`http://localhost/ctf/`** should work now. NGINX strips **`/ctf`** on the way in so the app sees paths like **`/api/flag`**, not **`/ctf/api/flag`**.
+        The Ingress is wired up — the CTF URL should work now (default **`http://localhost/ctf/`** on this machine). NGINX strips **`/ctf`** on the way in so the app sees paths like **`/api/flag`**, not **`/ctf/api/flag`**.
       verify: |
         svc=$(kubectl get ingress simple-ctf-ingress -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.name}' 2>/dev/null)
         test "$svc" = "simple-ctf-svc"
@@ -152,23 +152,27 @@ tabs:
       description: |
         The challenge is finally online — time to play for real.
 
-        Open **`http://localhost/ctf/`** in your browser, or **`curl`** the flag API at **`/ctf/api/flag`**. Paste the **flag** here (e.g. `CTF{...}`).
+        Open the CTF in your browser (**Open in browser** in the terminal bar, or **`http://<ingress-host>/ctf/`**), or **`curl`** the flag API at **`/ctf/api/flag`**. Paste the **flag** here (e.g. `CTF{...}`).
+
+        On a VM, set **`K3SLAB_INGRESS_HOST`** to the **machine hostname** (not an IP) when starting the container, and open **`http://<hostname>/ctf/`** from another machine on the network.
       answer_type: text
       correct_message: |
         That's the flag — you recovered the deployment and beat the challenge. Nice work.
       incorrect_message: |
-        Not quite — that does not match what the challenge returns. Make sure **`http://localhost/ctf/`** loads (`curl -s -H 'Host: localhost' http://127.0.0.1/ctf/api/flag`) and paste the exact **`flag`** from the JSON.
+        Not quite — that does not match what the challenge returns. Make sure the CTF loads (`curl -s -H "Host: ${K3SLAB_INGRESS_HOST:-localhost}" http://127.0.0.1/ctf/api/flag`) and paste the exact **`flag`** from the JSON.
       verify: |
         ready=$(kubectl get deploy simple-ctf -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
         test "$ready" = "1"
-        expected=$(curl -sS --max-time 5 -f -H 'Host: localhost' 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty')
+        host="${K3SLAB_INGRESS_HOST:-localhost}"
+        expected=$(curl -sS --max-time 5 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty')
         test -n "$expected"
         test "$ANSWER" = "$expected"
       solution_answer_script: |
         set -e
+        host="${K3SLAB_INGRESS_HOST:-localhost}"
         kubectl wait --for=condition=available deploy/simple-ctf --timeout=120s >/dev/null 2>&1 || true
         for i in $(seq 1 90); do
-          flag=$(curl -sS --max-time 2 -f -H 'Host: localhost' 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty') || true
+          flag=$(curl -sS --max-time 2 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty') || true
           if test -n "$flag"; then
             printf '%s\n' "$flag"
             exit 0
@@ -177,8 +181,8 @@ tabs:
         done
         exit 1
       hints:
-        - "`curl -s -H 'Host: localhost' http://127.0.0.1/ctf/api/flag`"
-        - "Terminal header may show an **Open in browser** tab for **`localhost/ctf`**"
+        - "`curl -s -H \"Host: ${K3SLAB_INGRESS_HOST:-localhost}\" http://127.0.0.1/ctf/api/flag`"
+        - "Terminal header may show an **Open in browser** tab for your ingress host (e.g. **`localhost/ctf`**)"
         - "Paste the flag string only — not the full JSON response"
 
   markdowns:
@@ -212,6 +216,6 @@ tabs:
       title: Lab info
       icon: info
       content: |
-        Namespace **`deployment-basics`** (default for **`kubectl`** after manifests are applied). Exposed via **Ingress** at **`http://localhost/ctf/`**.
+        Namespace **`deployment-basics`** (default for **`kubectl`** after manifests are applied). Exposed via **Ingress** at **`http://<ingress-host>/ctf/`** (default **`localhost`** on this machine).
 
-        Run the k3slab container with **`-p 80:80`** (and `-p 3010:3010` for this UI). **ingress-nginx** serves **`/ctf`** on port 80 and rewrites paths so the app sees **`/`** (not `/ctf`).
+        Run the k3slab container with **`-p 80:80`** (and `-p 3010:3010` for this UI). On a VM accessed from another machine, set **`-e K3SLAB_INGRESS_HOST=<machine-hostname>`** (hostname only, not an IP). **ingress-nginx** serves **`/ctf`** on port 80 and rewrites paths so the app sees **`/`** (not `/ctf`).

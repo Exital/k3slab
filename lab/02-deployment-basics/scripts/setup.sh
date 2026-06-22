@@ -3,6 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+export K3SLAB_INGRESS_HOST="${K3SLAB_INGRESS_HOST:-localhost}"
+
 echo "[deployment-basics] Installing ingress-nginx for this lab..."
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx >/dev/null 2>&1 || true
 helm repo update ingress-nginx >/dev/null 2>&1 || true
@@ -20,5 +22,21 @@ helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
   --set controller.ingressClassResource.name=nginx \
   --set controller.ingressClassResource.default=true \
   --set controller.watchIngressWithoutClass=true
+
+# When lab manifests are read-only (e.g. make test-lab), patch the live Ingress host.
+if [[ "${K3SLAB_INGRESS_HOST}" != "localhost" ]]; then
+  for _ in $(seq 1 60); do
+    if kubectl get ingress simple-ctf-ingress -n deployment-basics &>/dev/null; then
+      current=$(kubectl get ingress simple-ctf-ingress -n deployment-basics -o jsonpath='{.spec.rules[0].host}' 2>/dev/null || true)
+      if [[ "${current}" != "${K3SLAB_INGRESS_HOST}" ]]; then
+        kubectl patch ingress simple-ctf-ingress -n deployment-basics --type=json \
+          -p "[{\"op\":\"replace\",\"path\":\"/spec/rules/0/host\",\"value\":\"${K3SLAB_INGRESS_HOST}\"}]" \
+          >/dev/null 2>&1 || true
+      fi
+      break
+    fi
+    sleep 2
+  done
+fi
 
 echo "[deployment-basics] ingress-nginx is ready."

@@ -37,7 +37,7 @@ If a workshop or your own manifests create **NodePort** Services or **Ingress** 
 | Lab | Ports to publish | URL (after fixes) |
 |-----|------------------|-------------------|
 | **kubectl Basics** (`01-kubectl-basics`) | `-p 3010:3010` | Workshop UI only |
-| **Deployment Basics** (`02-deployment-basics`) | `-p 3010:3010` **and** `-p 80:80` | **`http://localhost/ctf/`** for the [simple-ctf](https://github.com/Exital/simple-ctf) app |
+| **Deployment Basics** (`02-deployment-basics`) | `-p 3010:3010` **and** `-p 80:80` | **`http://<ingress-host>/ctf/`** (default **`http://localhost/ctf/`**) for the [simple-ctf](https://github.com/Exital/simple-ctf) app |
 
 Example for the deployment lab:
 
@@ -48,11 +48,25 @@ docker run --rm --name k3slab \
   k3slab:latest
 ```
 
+On a **VM** accessed from another machine on the network, set **`K3SLAB_INGRESS_HOST`** to the **machine hostname** (not an IP — Ingress `rules[].host` is a hostname). Run `hostname` on the VM (e.g. `k3slab-vm`), then:
+
+```bash
+# On the VM: hostname   # e.g. k3slab-vm
+docker run --rm --name k3slab \
+  --privileged --cgroupns=host \
+  -p 3010:3010 -p 80:80 \
+  -e K3SLAB_INGRESS_HOST=k3slab-vm \
+  k3slab:latest
+```
+
+From a laptop on the same network, open **`http://k3slab-vm/ctf/`** (DNS or `/etc/hosts` must resolve the hostname to the VM).
+
 For other Ingress or NodePort workloads, publish the matching ports and set **`K3SLAB_PUBLIC_ORIGIN`** for NodePort URLs if needed.
 
 #### Environment variables
 
 - **`K3SLAB_PUBLIC_ORIGIN`** (optional): scheme + host for **NodePort** links. Default `http://localhost`.
+- **`K3SLAB_INGRESS_HOST`** (optional): **hostname** for Ingress `rules[].host` in templated lab manifests and workshop verify curls. Default **`localhost`**. Use the **machine hostname** on a VM (e.g. `k3slab-vm`), not an IP address.
 - **`K3SLAB_INGRESS_HTTP_PORT`** / **`K3SLAB_INGRESS_HTTPS_PORT`** (optional): defaults **80** / **443** for Ingress URLs if you customized the ingress controller.
 - **`k9s_enable`** (optional): default **`false`**. Set to **`true`** (or `1` / `yes`) to put the pre-installed **k9s** binary on `PATH`. The image bundles k9s at `/usr/local/lib/k3slab/k9s`; the entrypoint symlinks it to `/usr/local/bin/k9s` only when enabled.
 - **`K3SLAB_DEBUG`** (optional): set to **`true`** (or `1` / `yes`) to log exposure watcher sync/resync messages (`exposure: synced …`, `exposure: periodic resync …`). Off by default so routine logs stay quiet.
@@ -143,11 +157,13 @@ Dynamic answer (flag from HTTP):
   type: question
   answer_type: text
   verify: |
-    expected=$(curl -sf -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | jq -r .flag)
+    host="${K3SLAB_INGRESS_HOST:-localhost}"
+    expected=$(curl -sf -H "Host: ${host}" http://127.0.0.1/ctf/api/flag | jq -r .flag)
     test "$ANSWER" = "$expected"
   solution_answer_script: |
     set -e
-    curl -sf -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | jq -r .flag
+    host="${K3SLAB_INGRESS_HOST:-localhost}"
+    curl -sf -H "Host: ${host}" http://127.0.0.1/ctf/api/flag | jq -r .flag
 ```
 
 Setup plus dynamic answer (both scripts):
@@ -157,7 +173,8 @@ solution_script: |
   echo "Applying fixes..."
   kubectl patch svc my-svc --type=json -p '[...]'
 solution_answer_script: |
-  curl -sf -H 'Host: localhost' http://127.0.0.1/ctf/api/flag | jq -r .flag
+  host="${K3SLAB_INGRESS_HOST:-localhost}"
+  curl -sf -H "Host: ${host}" http://127.0.0.1/ctf/api/flag | jq -r .flag
 ```
 
 `make test-lab` mounts your **`lab/`** tree read-only (`:ro`); do not rely on writing files under the lab directory from solution scripts. Use **`solution_answer_script`** stdout instead.
@@ -184,6 +201,24 @@ docker run --rm --name k3slab \
 ```
 
 A single custom lab: create `01-my-course/workshop.yml` and mount the parent directory to `/lab` (the lab id is the folder name, `01-my-course`). Optionally set **`-e LAB_ID=01-my-course`** to start on that lab without using the picker.
+
+#### Lab manifest templates
+
+Labs can ship Kubernetes manifests under **`manifests/`** with environment-specific values templated from **`K3SLAB_*`** variables:
+
+1. Add **`manifests/<name>.yml.template`** (or **`.yaml.template`**) with placeholders such as **`${K3SLAB_INGRESS_HOST}`**.
+2. Commit a rendered **`manifests/<name>.yml`** with defaults (e.g. `host: localhost`) so read-only mounts and tests work without writing.
+3. The platform renders templates at container start, on lab switch/restart, and before workshop question setup.
+
+Optional **`scripts/render-manifests.sh`** in a lab overrides the default glob renderer for custom logic.
+
+Example Ingress host line in a template:
+
+```yaml
+    - host: ${K3SLAB_INGRESS_HOST}
+```
+
+In **`verify`** / **`solution_*`** scripts, use **`host="${K3SLAB_INGRESS_HOST:-localhost}"`** in curl **`Host`** headers when testing Ingress from inside the container.
 
 ### Quick checks
 
