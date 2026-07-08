@@ -130,7 +130,39 @@ tabs:
             kubectl apply -f manifests/dashboard-ingress.yml
             kubectl rollout status deploy/load-dashboard --timeout=120s
             kubectl delete pod loadgen --ignore-not-found >/dev/null
-            kubectl run loadgen --image=busybox:1.36 --restart=Never -- /bin/sh -c 'while true; do wget -q -O- http://autoscale-api >/dev/null; done'
+            kubectl delete deploy loadgen --ignore-not-found >/dev/null
+            kubectl apply -f - <<'EOF'
+            apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: loadgen
+              namespace: workloads-lab
+              labels:
+                app: loadgen
+            spec:
+              replicas: 2
+              selector:
+                matchLabels:
+                  app: loadgen
+              template:
+                metadata:
+                  labels:
+                    app: loadgen
+                spec:
+                  containers:
+                    - name: loadgen
+                      image: busybox:1.36
+                      command:
+                        - /bin/sh
+                        - -c
+                        - |
+                          while true; do
+                            for i in $(seq 1 80); do
+                              wget -q -O- http://autoscale-api >/dev/null &
+                            done
+                            wait
+                          done
+            EOF
       correct_message: |
         HPA configuration looks good. Now the app can react to traffic pressure instead of staying stuck at one replica.
       verify: |
@@ -173,7 +205,39 @@ tabs:
         test "${current:-0}" -ge 2 -o "${desired:-0}" -ge 2
       solution_script: |
         kubectl delete pod loadgen --ignore-not-found >/dev/null
-        kubectl run loadgen --image=busybox:1.36 --restart=Never -- /bin/sh -c 'while true; do wget -q -O- http://autoscale-api >/dev/null; done'
+        kubectl delete deploy loadgen --ignore-not-found >/dev/null
+        kubectl apply -f - <<'EOF'
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: loadgen
+          namespace: workloads-lab
+          labels:
+            app: loadgen
+        spec:
+          replicas: 2
+          selector:
+            matchLabels:
+              app: loadgen
+          template:
+            metadata:
+              labels:
+                app: loadgen
+            spec:
+              containers:
+                - name: loadgen
+                  image: busybox:1.36
+                  command:
+                    - /bin/sh
+                    - -c
+                    - |
+                      while true; do
+                        for i in $(seq 1 80); do
+                          wget -q -O- http://autoscale-api >/dev/null &
+                        done
+                        wait
+                      done
+        EOF
       hints:
         - "HPA decisions need metrics; wait up to a couple of minutes after creating HPA"
         - "Check that metrics are available with `kubectl top pods`"
@@ -212,7 +276,7 @@ tabs:
           - `kubectl get hpa autoscale-api -w`
           - `kubectl top pods`
         - Load generator:
-          - `kubectl get pod loadgen`
+          - `kubectl get deploy,pod -l app=loadgen`
 
     - id: hpa-note
       title: HPA note

@@ -17,4 +17,5 @@ kubectl -n workloads-lab set image deploy/web-rollout web-rollout=nginx:not-a-re
 # Keep the autoscaling challenge deterministic.
 kubectl -n workloads-lab delete hpa autoscale-api --ignore-not-found >/dev/null
 kubectl -n workloads-lab delete pod loadgen --ignore-not-found >/dev/null
+kubectl -n workloads-lab delete deploy loadgen --ignore-not-found >/dev/null
 kubectl config set-context --current --namespace=workloads-lab >/dev/null

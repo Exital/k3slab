@@ -8,6 +8,7 @@ data:
     import json
     import os
     import re
+    import ssl
     import urllib.error
     import urllib.parse
     import urllib.request
@@ -22,14 +23,17 @@ data:
     SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
     with open(f"{SA_DIR}/token", "r", encoding="utf-8") as f:
       TOKEN = f.read().strip()
-    with open(f"{SA_DIR}/ca.crt", "rb") as f:
-      CA_CERT = f.read()
+    CA_FILE = f"{SA_DIR}/ca.crt"
 
     API_HOST = os.getenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
     API_PORT = os.getenv("KUBERNETES_SERVICE_PORT", "443")
     BASE = f"https://{API_HOST}:{API_PORT}"
 
     def parse_cpu_millicores(value: str) -> int:
+      if value.endswith("n"):
+        return int(round(int(value[:-1]) / 1000000.0))
+      if value.endswith("u"):
+        return int(round(int(value[:-1]) / 1000.0))
       if value.endswith("m"):
         return int(value[:-1])
       return int(float(value) * 1000)
@@ -51,18 +55,14 @@ data:
         return float(value) / (1024.0 * 1024.0)
       return 0.0
 
+    SSL_CTX = ssl.create_default_context(cafile=CA_FILE)
+
     def kget(path: str):
       req = urllib.request.Request(
         f"{BASE}{path}",
         headers={"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"},
       )
-      ctx = None
-      try:
-        import ssl
-        ctx = ssl.create_default_context(cadata=CA_CERT.decode("utf-8", errors="ignore"))
-      except Exception:
-        pass
-      with urllib.request.urlopen(req, timeout=4, context=ctx) as r:
+      with urllib.request.urlopen(req, timeout=4, context=SSL_CTX) as r:
         return json.loads(r.read().decode("utf-8"))
 
     def collect():
@@ -122,30 +122,36 @@ data:
         <title>Load Dashboard</title>
         <style>
           :root {
-            --bg: #0b1220;
-            --card: rgba(15, 23, 42, 0.75);
-            --border: rgba(148, 163, 184, 0.25);
+            --bg: #070b16;
+            --card: linear-gradient(160deg, rgba(16, 24, 42, 0.86), rgba(11, 18, 32, 0.86));
+            --border: rgba(148, 163, 184, 0.2);
             --text: #e2e8f0;
-            --muted: #94a3b8;
+            --muted: #91a0bb;
             --accent: #22d3ee;
+            --accent-2: #818cf8;
             --good: #22c55e;
             --warn: #f59e0b;
           }
           body {
             margin: 0;
             font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-            background: radial-gradient(1200px 800px at 20% -20%, #1d4ed8 0, transparent 50%), var(--bg);
+            background:
+              radial-gradient(1200px 900px at 8% -25%, #1d4ed8 0, transparent 45%),
+              radial-gradient(800px 600px at 90% -20%, #0ea5e9 0, transparent 35%),
+              var(--bg);
             color: var(--text);
           }
-          .wrap { max-width: 1080px; margin: 28px auto; padding: 0 16px; }
+          .wrap { max-width: 1180px; margin: 22px auto; padding: 0 16px; }
           .hero { display: flex; justify-content: space-between; align-items: end; gap: 12px; margin-bottom: 16px; }
-          .title { font-size: 30px; font-weight: 750; letter-spacing: -0.02em; }
-          .subtitle { color: var(--muted); margin-top: 6px; }
+          .title { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; }
+          .subtitle { color: var(--muted); margin-top: 4px; }
+          .kicker { color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; }
           .pill {
             border: 1px solid var(--border); background: var(--card); color: var(--accent);
             border-radius: 999px; padding: 6px 12px; font-size: 12px;
           }
-          .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+          .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+          .graphs { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
           .card {
             border: 1px solid var(--border); background: var(--card); backdrop-filter: blur(6px);
             border-radius: 14px; padding: 14px;
@@ -155,6 +161,13 @@ data:
           .hint { color: var(--muted); margin-top: 8px; font-size: 12px; }
           .bar { margin-top: 10px; height: 8px; border-radius: 999px; background: rgba(148,163,184,0.2); overflow: hidden; }
           .fill { height: 100%; width: 0%; background: linear-gradient(90deg, #06b6d4, #22c55e); transition: width .3s ease; }
+          .chart-wrap { margin-top: 10px; border-radius: 10px; overflow: hidden; border: 1px solid rgba(148,163,184,0.15); background: rgba(2,6,23,0.5); }
+          .chart { width: 100%; height: 170px; display: block; }
+          .line-a { stroke: #22d3ee; fill: none; stroke-width: 3; }
+          .line-b { stroke: #34d399; fill: none; stroke-width: 2; opacity: .95; }
+          .line-c { stroke: #818cf8; fill: none; stroke-width: 2; opacity: .95; }
+          .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
+          .dot { display: inline-block; width: 10px; height: 10px; border-radius: 999px; margin-right: 6px; }
           .footer { margin-top: 14px; color: var(--muted); font-size: 13px; }
           .errors { margin-top: 12px; color: var(--warn); font-size: 13px; white-space: pre-wrap; }
         </style>
@@ -163,8 +176,9 @@ data:
         <div class="wrap">
           <div class="hero">
             <div>
+              <div class="kicker">k3slab incident telemetry</div>
               <div class="title">Autoscale Load Dashboard</div>
-              <div class="subtitle">Watch load and per-pod pressure while HPA scales out.</div>
+              <div class="subtitle">Track total load vs per-pod pressure and watch graphs react after scale-out.</div>
             </div>
             <div class="pill" id="updated">Updating...</div>
           </div>
@@ -202,15 +216,81 @@ data:
               <div class="bar"><div class="fill" id="memFill"></div></div>
             </div>
           </div>
+          <div class="graphs">
+            <div class="card">
+              <div class="label">CPU trend (last ~80s)</div>
+              <div class="chart-wrap">
+                <svg class="chart" viewBox="0 0 600 170" preserveAspectRatio="none">
+                  <polyline id="cpuTotalLine" class="line-a" points=""></polyline>
+                  <polyline id="cpuAvgLine" class="line-b" points=""></polyline>
+                </svg>
+              </div>
+              <div class="legend">
+                <span><span class="dot" style="background:#22d3ee"></span>Total CPU (m)</span>
+                <span><span class="dot" style="background:#34d399"></span>CPU per pod (m)</span>
+              </div>
+            </div>
+            <div class="card">
+              <div class="label">Memory + replicas trend (last ~80s)</div>
+              <div class="chart-wrap">
+                <svg class="chart" viewBox="0 0 600 170" preserveAspectRatio="none">
+                  <polyline id="memAvgLine" class="line-a" points=""></polyline>
+                  <polyline id="replicaLine" class="line-c" points=""></polyline>
+                </svg>
+              </div>
+              <div class="legend">
+                <span><span class="dot" style="background:#22d3ee"></span>Memory per pod (Mi)</span>
+                <span><span class="dot" style="background:#818cf8"></span>Current replicas</span>
+              </div>
+            </div>
+          </div>
           <div class="footer" id="note"></div>
           <div class="errors" id="errors"></div>
         </div>
         <script>
+          const history = {
+            cpuTotal: [],
+            cpuAvg: [],
+            memAvg: [],
+            replicas: [],
+          };
+          const HISTORY_SIZE = 40;
           function fmt(n, d=1) { return Number(n || 0).toFixed(d); }
+
+          function push(name, value) {
+            history[name].push(Number(value || 0));
+            if (history[name].length > HISTORY_SIZE) history[name].shift();
+          }
+
+          function seriesToPoints(values, maxY) {
+            if (!values.length) return "";
+            const w = 600;
+            const h = 170;
+            const step = values.length <= 1 ? 0 : w / (values.length - 1);
+            return values.map((v, i) => {
+              const x = i * step;
+              const y = h - (Math.max(0, Math.min(maxY, v)) / maxY) * (h - 4) - 2;
+              return `${x.toFixed(1)},${y.toFixed(1)}`;
+            }).join(" ");
+          }
+
+          function drawCharts() {
+            const cpuMax = Math.max(50, ...history.cpuTotal, ...history.cpuAvg);
+            const mixedMax = Math.max(20, ...history.memAvg, ...history.replicas.map((r) => r * 40));
+            document.getElementById("cpuTotalLine").setAttribute("points", seriesToPoints(history.cpuTotal, cpuMax));
+            document.getElementById("cpuAvgLine").setAttribute("points", seriesToPoints(history.cpuAvg, cpuMax));
+            document.getElementById("memAvgLine").setAttribute("points", seriesToPoints(history.memAvg, mixedMax));
+            document.getElementById("replicaLine").setAttribute(
+              "points",
+              seriesToPoints(history.replicas.map((r) => r * 40), mixedMax),
+            );
+          }
+
           async function tick() {
             try {
               const res = await fetch('/api/metrics', { cache: 'no-store' });
               const m = await res.json();
+              const currentReplicas = Number(m.hpa.currentReplicas || 0);
               document.getElementById('replicas').textContent =
                 `${m.deployment.readyReplicas || 0} / ${m.deployment.replicas || 0}`;
               document.getElementById('desired').textContent =
@@ -223,6 +303,11 @@ data:
                 `${Math.min(100, (Number(m.cpuAverageMillicoresPerPod || 0) / 250) * 100)}%`;
               document.getElementById('memFill').style.width =
                 `${Math.min(100, (Number(m.memoryAverageMiBPerPod || 0) / 220) * 100)}%`;
+              push("cpuTotal", Number(m.cpuTotalMillicores || 0));
+              push("cpuAvg", Number(m.cpuAverageMillicoresPerPod || 0));
+              push("memAvg", Number(m.memoryAverageMiBPerPod || 0));
+              push("replicas", currentReplicas);
+              drawCharts();
               document.getElementById('updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
               document.getElementById('note').textContent =
                 `${m.note} Pods measured: ${m.podsMeasured || 0}.`;
