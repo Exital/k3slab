@@ -1,0 +1,215 @@
+name: Workloads, Probes, and Autoscaling
+description: Incident challenge: recover a broken rollout, repair probes, and autoscale under load.
+
+tabs:
+  steps:
+    - id: prepare-lab
+      type: task
+      title: Prepare the incident lab
+      run: bash scripts/setup.sh
+
+    - id: question-rollout-rollback
+      type: question
+      title: Roll back the broken release
+      description: |
+        **Pager alert #1:** the new web release is failing and traffic is down.
+
+        Deployment **`web-rollout`** in namespace **`workloads-lab`** was updated to a bad image tag.
+        Use rollout commands to inspect history and roll back to the last healthy revision.
+
+        This step completes automatically when rollback is successful.
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        Nice recovery. The rollout is healthy again and serving traffic.
+      verify: |
+        img=$(kubectl get deploy web-rollout -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)
+        test "$img" = "nginx:1.27-alpine"
+        ready=$(kubectl get deploy web-rollout -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "$ready" = "2"
+      solution_script: |
+        kubectl rollout undo deploy/web-rollout
+      hints:
+        - "`kubectl get pods` should show image pull issues on the web deployment"
+        - "`kubectl rollout history deploy/web-rollout`"
+        - "`kubectl rollout undo deploy/web-rollout`"
+
+    - id: question-rollout-pause-resume
+      type: question
+      title: Rollout control command
+      description: |
+        **Pager drill:** you want to temporarily stop rollout changes while your team checks logs.
+
+        Which command pauses rollout changes for the web Deployment?
+      answer_type: single_choice
+      options:
+        - kubectl rollout pause deploy/web-rollout
+        - kubectl rollout restart deploy/web-rollout
+        - kubectl scale deploy/web-rollout --replicas=0
+      verify: |
+        test "$ANSWER" = "kubectl rollout pause deploy/web-rollout"
+      solution_answer: "kubectl rollout pause deploy/web-rollout"
+      correct_message: |
+        Correct. `rollout pause` freezes further rollout progression until you run `rollout resume`.
+      hints:
+        - "Look for the command that changes rollout strategy state, not replicas"
+
+    - id: question-fix-probes
+      type: question
+      title: Repair readiness and liveness probes
+      description: |
+        **Pager alert #2:** `probe-app` is unstable.
+
+        The probe paths are wrong, so Kubernetes keeps the app unready and repeatedly restarts it.
+        Fix both probes so they check a valid HTTP path on this app.
+
+        This step completes automatically after probe behavior becomes healthy.
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        Great. Readiness and liveness are now configured correctly, and the pod is stable.
+      verify: |
+        rpath=$(kubectl get deploy probe-app -o jsonpath='{.spec.template.spec.containers[0].readinessProbe.httpGet.path}' 2>/dev/null)
+        lpath=$(kubectl get deploy probe-app -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.httpGet.path}' 2>/dev/null)
+        test "$rpath" = "/"
+        test "$lpath" = "/"
+        ready=$(kubectl get deploy probe-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "$ready" = "1"
+        restarts=$(kubectl get pods -l app=probe-app -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}' 2>/dev/null)
+        test "${restarts:-0}" -le 2
+      solution_script: |
+        kubectl patch deploy probe-app --type=json -p '[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/"},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/"}]'
+      hints:
+        - "`kubectl describe pod -l app=probe-app` and check probe failures in Events"
+        - "`kubectl get deploy probe-app -o yaml` to inspect probe paths"
+        - "For nginx, `/` returns HTTP 200 and is a good simple probe target"
+
+    - id: question-ready-vs-live
+      type: question
+      title: Readiness vs liveness basics
+      description: |
+        Which statement is correct?
+      answer_type: single_choice
+      options:
+        - Readiness decides if a pod gets Service traffic; liveness decides if kubelet should restart the container.
+        - Liveness decides if a pod gets Service traffic; readiness only changes logs.
+        - Readiness and liveness are identical and can be used interchangeably.
+      verify: |
+        test "$ANSWER" = "Readiness decides if a pod gets Service traffic; liveness decides if kubelet should restart the container."
+      solution_answer: "Readiness decides if a pod gets Service traffic; liveness decides if kubelet should restart the container."
+      correct_message: |
+        Exactly. Readiness gates traffic routing, while liveness handles stuck process recovery.
+      hints:
+        - "Think: traffic routing vs process restart"
+
+    - id: question-hpa-create
+      type: question
+      title: Enable HPA with CPU and memory
+      description: |
+        **Pager alert #3:** traffic spike incoming. Right now `autoscale-api` is fixed at 1 replica.
+
+        Create an HPA named **`autoscale-api`** for Deployment **`autoscale-api`** with:
+        - min replicas: **1**
+        - max replicas: **6**
+        - target CPU utilization: **50%**
+        - target memory utilization: **70%**
+
+        This challenge checks that both CPU and memory metrics are configured.
+      answer_type: observe
+      poll_interval_seconds: 5
+      setup:
+        - run: |
+            kubectl delete pod loadgen --ignore-not-found >/dev/null
+            kubectl run loadgen --image=busybox:1.36 --restart=Never -- /bin/sh -c 'while true; do wget -q -O- http://autoscale-api >/dev/null; done'
+      correct_message: |
+        HPA configuration looks good. Now the app can react to traffic pressure instead of staying stuck at one replica.
+      verify: |
+        kubectl get hpa autoscale-api >/dev/null 2>&1
+        min=$(kubectl get hpa autoscale-api -o jsonpath='{.spec.minReplicas}' 2>/dev/null)
+        max=$(kubectl get hpa autoscale-api -o jsonpath='{.spec.maxReplicas}' 2>/dev/null)
+        test "$min" = "1"
+        test "$max" = "6"
+
+        cpu_target=$(kubectl get hpa autoscale-api -o jsonpath='{.spec.metrics[?(@.resource.name=="cpu")].resource.target.averageUtilization}' 2>/dev/null)
+        mem_target=$(kubectl get hpa autoscale-api -o jsonpath='{.spec.metrics[?(@.resource.name=="memory")].resource.target.averageUtilization}' 2>/dev/null)
+        test "$cpu_target" = "50"
+        test "$mem_target" = "70"
+      solution_script: |
+        kubectl autoscale deployment autoscale-api --min=1 --max=6 --cpu-percent=50
+        kubectl patch hpa autoscale-api --type=merge -p '{"spec":{"metrics":[{"type":"Resource","resource":{"name":"cpu","target":{"type":"Utilization","averageUtilization":50}}},{"type":"Resource","resource":{"name":"memory","target":{"type":"Utilization","averageUtilization":70}}}]}}'
+      hints:
+        - "Start with: `kubectl autoscale deployment autoscale-api --min=1 --max=6 --cpu-percent=50`"
+        - "Then add memory target by editing/patching the HPA to API version autoscaling/v2 metrics format"
+        - "`kubectl get hpa autoscale-api -o yaml`"
+
+    - id: question-hpa-scales
+      type: question
+      title: Watch scale-out under load
+      description: |
+        Keep the load generator running and watch replicas.
+
+        This step completes when Kubernetes scales **`autoscale-api`** above 1 replica.
+        Helpful commands:
+        - `kubectl get hpa autoscale-api -w`
+        - `kubectl get deploy autoscale-api`
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        Nice. Autoscaling kicked in and the deployment scaled out to handle load.
+      verify: |
+        current=$(kubectl get hpa autoscale-api -o jsonpath='{.status.currentReplicas}' 2>/dev/null)
+        desired=$(kubectl get hpa autoscale-api -o jsonpath='{.status.desiredReplicas}' 2>/dev/null)
+        test "${current:-0}" -ge 2 -o "${desired:-0}" -ge 2
+      solution_script: |
+        kubectl delete pod loadgen --ignore-not-found >/dev/null
+        kubectl run loadgen --image=busybox:1.36 --restart=Never -- /bin/sh -c 'while true; do wget -q -O- http://autoscale-api >/dev/null; done'
+      hints:
+        - "HPA decisions need metrics; wait up to a couple of minutes after creating HPA"
+        - "Check that metrics are available with `kubectl top pods`"
+        - "If needed, recreate the load pod and keep it running"
+
+  markdowns:
+    - id: mission-brief
+      title: Mission brief
+      icon: emergency
+      content: |
+        ## Incident Challenge: Lab 3
+
+        You are the on-call engineer for a startup launch.
+
+        1. Recover from a broken rollout.
+        2. Repair probe behavior so traffic reaches healthy pods only.
+        3. Enable autoscaling so the app survives traffic spikes.
+
+        Namespace: **`workloads-lab`** (set as default after setup).
+
+    - id: cheat-sheet
+      title: Cheat sheet
+      icon: description
+      content: |
+        ## Useful commands
+
+        - Rollout status/history:
+          - `kubectl rollout status deploy/web-rollout`
+          - `kubectl rollout history deploy/web-rollout`
+          - `kubectl rollout undo deploy/web-rollout`
+        - Probe troubleshooting:
+          - `kubectl describe pod -l app=probe-app`
+          - `kubectl get deploy probe-app -o yaml`
+        - HPA:
+          - `kubectl autoscale deployment autoscale-api --min=1 --max=6 --cpu-percent=50`
+          - `kubectl get hpa autoscale-api -w`
+          - `kubectl top pods`
+        - Load generator:
+          - `kubectl get pod loadgen`
+
+    - id: hpa-note
+      title: HPA note
+      icon: info
+      content: |
+        ## Why resource requests matter
+
+        HPA on CPU/memory compares observed usage against pod **requests**.
+        If requests are missing or unrealistic, scaling decisions will be misleading.
+
+        In this lab, `autoscale-api` includes CPU and memory requests so HPA can make useful decisions.
