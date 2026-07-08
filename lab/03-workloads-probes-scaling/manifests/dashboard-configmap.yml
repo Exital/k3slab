@@ -297,7 +297,10 @@ data:
           const liveBtn = document.getElementById("liveBtn");
           const prevBtn = document.getElementById("prevBtn");
           const nextBtn = document.getElementById("nextBtn");
-          const apiUrl = new URL("api/metrics", window.location.href).toString();
+          const normalizedBase = window.location.href.endsWith("/")
+            ? window.location.href
+            : `${window.location.href}/`;
+          const apiUrl = new URL("api/metrics", normalizedBase).toString();
 
           function fmt(n, d=1) { return Number(n || 0).toFixed(d); }
 
@@ -426,6 +429,11 @@ data:
         return path
 
       def do_GET(self):
+        if self.path == "/load-dashboard":
+          self.send_response(301)
+          self.send_header("Location", "/load-dashboard/")
+          self.end_headers()
+          return
         path = self.normalize_path(self.path)
         if path in ("/", "/index.html"):
           self.send_response(200)
