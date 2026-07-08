@@ -362,7 +362,7 @@ data:
               `${Math.min(100, (Number(m.memoryAverageMiBPerPod || 0) / 220) * 100)}%`;
             document.getElementById('note').textContent =
               `${m.note} Pods measured: ${m.podsMeasured || 0}.`;
-            document.getElementById('errors').textContent = (m.errors || []).join('\n');
+            document.getElementById('errors').textContent = (m.errors || []).join('\\n');
             const modeText = liveMode ? "LIVE" : "REPLAY";
             document.getElementById('updated').textContent =
               `${modeText} @ ${new Date(m.ts).toLocaleTimeString()}`;
