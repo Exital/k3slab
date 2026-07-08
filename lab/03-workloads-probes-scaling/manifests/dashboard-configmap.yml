@@ -257,7 +257,7 @@ data:
           </div>
           <div class="graphs">
             <div class="card">
-              <div class="label">CPU trend (last ~80s)</div>
+              <div class="label">CPU trend (last ~3 min)</div>
               <div class="chart-wrap">
                 <svg class="chart" viewBox="0 0 600 170" preserveAspectRatio="none">
                   <polyline id="cpuTotalLine" class="line-a" points=""></polyline>
@@ -270,7 +270,7 @@ data:
               </div>
             </div>
             <div class="card">
-              <div class="label">Memory + replicas trend (last ~80s)</div>
+              <div class="label">Memory + replicas trend (last ~3 min)</div>
               <div class="chart-wrap">
                 <svg class="chart" viewBox="0 0 600 170" preserveAspectRatio="none">
                   <polyline id="memAvgLine" class="line-a" points=""></polyline>
@@ -368,15 +368,20 @@ data:
               `${modeText} @ ${new Date(m.ts).toLocaleTimeString()}`;
             timelineInfo.textContent = `${idx + 1}/${snapshots.length} • replicas ${currentReplicas}`;
             slider.value = String(idx);
+            refreshHistorySeries();
           }
 
           function refreshHistorySeries() {
-            history.cpuTotal = snapshots.map((s) => Number(s.cpuTotalMillicores || 0));
-            history.cpuAvg = snapshots.map((s) => Number(s.cpuAverageMillicoresPerPod || 0));
-            history.memAvg = snapshots.map((s) => Number(s.memoryAverageMiBPerPod || 0));
-            history.replicas = snapshots.map((s) => Number(s.hpa.currentReplicas || 0));
-            drawCharts();
             slider.max = String(Math.max(0, snapshots.length - 1));
+            const endIdx = Number(liveMode ? snapshots.length - 1 : (slider.value || 0));
+            const safeEnd = Math.max(0, Math.min(endIdx, snapshots.length - 1));
+            const startIdx = Math.max(0, safeEnd - HISTORY_SIZE + 1);
+            const windowSnaps = snapshots.slice(startIdx, safeEnd + 1);
+            history.cpuTotal = windowSnaps.map((s) => Number(s.cpuTotalMillicores || 0));
+            history.cpuAvg = windowSnaps.map((s) => Number(s.cpuAverageMillicoresPerPod || 0));
+            history.memAvg = windowSnaps.map((s) => Number(s.memoryAverageMiBPerPod || 0));
+            history.replicas = windowSnaps.map((s) => Number(s.hpa.currentReplicas || 0));
+            drawCharts();
           }
 
           async function tick() {
