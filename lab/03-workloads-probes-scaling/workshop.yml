@@ -1,5 +1,5 @@
 name: Workloads, Probes, and Autoscaling
-description: Incident challenge: recover a broken rollout, repair probes, and autoscale under load.
+description: "Incident challenge: recover a broken rollout, repair probes, and autoscale under load."
 
 tabs:
   steps:
