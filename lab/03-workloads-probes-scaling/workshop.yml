@@ -111,6 +111,7 @@ tabs:
         A load dashboard is now published over Ingress at:
         **`http://<ingress-host>/load-dashboard/`** (default host is `localhost` on this machine).
         Keep it open while you work — after autoscaling, the **per-pod CPU/memory** cards should drop.
+        The dashboard keeps a **3-minute timeline** and includes replay controls so you can rewind if you miss the scale event.
 
         Create an HPA named **`autoscale-api`** for Deployment **`autoscale-api`** with:
         - min replicas: **1**

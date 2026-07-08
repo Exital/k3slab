@@ -168,7 +168,34 @@ data:
           .line-c { stroke: #818cf8; fill: none; stroke-width: 2; opacity: .95; }
           .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
           .dot { display: inline-block; width: 10px; height: 10px; border-radius: 999px; margin-right: 6px; }
-          .footer { margin-top: 14px; color: var(--muted); font-size: 13px; }
+          .controls {
+            margin: 12px 0 6px;
+            border: 1px solid var(--border);
+            background: var(--card);
+            border-radius: 14px;
+            padding: 10px 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+          }
+          .btn {
+            background: rgba(15,23,42,0.7);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 10px;
+            padding: 6px 10px;
+            font-size: 12px;
+            cursor: pointer;
+          }
+          .btn.active {
+            border-color: rgba(34,211,238,0.6);
+            color: var(--accent);
+          }
+          .slider-wrap { flex: 1; min-width: 220px; }
+          .slider-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
+          input[type=range] { width: 100%; }
+          .footer { margin-top: 10px; color: var(--muted); font-size: 13px; }
           .errors { margin-top: 12px; color: var(--warn); font-size: 13px; white-space: pre-wrap; }
         </style>
       </head>
@@ -181,6 +208,18 @@ data:
               <div class="subtitle">Track total load vs per-pod pressure and watch graphs react after scale-out.</div>
             </div>
             <div class="pill" id="updated">Updating...</div>
+          </div>
+          <div class="controls">
+            <button class="btn active" id="liveBtn" type="button">Live</button>
+            <button class="btn" id="prevBtn" type="button">-10s</button>
+            <button class="btn" id="nextBtn" type="button">+10s</button>
+            <div class="slider-wrap">
+              <div class="slider-label">
+                <span>Timeline window (3 minutes)</span>
+                <span id="timelineInfo">Waiting for samples...</span>
+              </div>
+              <input id="timelineSlider" type="range" min="0" max="0" value="0" step="1" />
+            </div>
           </div>
           <div class="grid">
             <div class="card">
@@ -248,13 +287,18 @@ data:
           <div class="errors" id="errors"></div>
         </div>
         <script>
-          const history = {
-            cpuTotal: [],
-            cpuAvg: [],
-            memAvg: [],
-            replicas: [],
-          };
-          const HISTORY_SIZE = 40;
+          const history = { cpuTotal: [], cpuAvg: [], memAvg: [], replicas: [] };
+          const snapshots = [];
+          const HISTORY_SIZE = 90; // 3 minutes @ 2s interval
+          const STEP_SIZE = 5; // ~10 seconds
+          let liveMode = true;
+          const slider = document.getElementById("timelineSlider");
+          const timelineInfo = document.getElementById("timelineInfo");
+          const liveBtn = document.getElementById("liveBtn");
+          const prevBtn = document.getElementById("prevBtn");
+          const nextBtn = document.getElementById("nextBtn");
+          const apiUrl = new URL("api/metrics", window.location.href).toString();
+
           function fmt(n, d=1) { return Number(n || 0).toFixed(d); }
 
           function push(name, value) {
@@ -286,36 +330,86 @@ data:
             );
           }
 
+          function setLive(enabled) {
+            liveMode = enabled;
+            if (enabled) {
+              liveBtn.classList.add("active");
+              slider.value = String(Math.max(0, snapshots.length - 1));
+            } else {
+              liveBtn.classList.remove("active");
+            }
+          }
+
+          function renderSnapshot(index) {
+            if (!snapshots.length) return;
+            const idx = Math.max(0, Math.min(index, snapshots.length - 1));
+            const m = snapshots[idx];
+            const currentReplicas = Number(m.hpa.currentReplicas || 0);
+            document.getElementById('replicas').textContent =
+              `${m.deployment.readyReplicas || 0} / ${m.deployment.replicas || 0}`;
+            document.getElementById('desired').textContent =
+              `${m.hpa.currentReplicas || 0} / ${m.hpa.desiredReplicas || 0}`;
+            document.getElementById('cpuTotal').textContent = `${m.cpuTotalMillicores || 0} m`;
+            document.getElementById('cpuAvg').textContent = `${fmt(m.cpuAverageMillicoresPerPod)} m`;
+            document.getElementById('memTotal').textContent = `${fmt(m.memoryTotalMiB)} Mi`;
+            document.getElementById('memAvg').textContent = `${fmt(m.memoryAverageMiBPerPod)} Mi`;
+            document.getElementById('cpuFill').style.width =
+              `${Math.min(100, (Number(m.cpuAverageMillicoresPerPod || 0) / 250) * 100)}%`;
+            document.getElementById('memFill').style.width =
+              `${Math.min(100, (Number(m.memoryAverageMiBPerPod || 0) / 220) * 100)}%`;
+            document.getElementById('note').textContent =
+              `${m.note} Pods measured: ${m.podsMeasured || 0}.`;
+            document.getElementById('errors').textContent = (m.errors || []).join('\n');
+            const modeText = liveMode ? "LIVE" : "REPLAY";
+            document.getElementById('updated').textContent =
+              `${modeText} @ ${new Date(m.ts).toLocaleTimeString()}`;
+            timelineInfo.textContent = `${idx + 1}/${snapshots.length} • replicas ${currentReplicas}`;
+            slider.value = String(idx);
+          }
+
+          function refreshHistorySeries() {
+            history.cpuTotal = snapshots.map((s) => Number(s.cpuTotalMillicores || 0));
+            history.cpuAvg = snapshots.map((s) => Number(s.cpuAverageMillicoresPerPod || 0));
+            history.memAvg = snapshots.map((s) => Number(s.memoryAverageMiBPerPod || 0));
+            history.replicas = snapshots.map((s) => Number(s.hpa.currentReplicas || 0));
+            drawCharts();
+            slider.max = String(Math.max(0, snapshots.length - 1));
+          }
+
           async function tick() {
             try {
-              const res = await fetch('/api/metrics', { cache: 'no-store' });
+              const res = await fetch(apiUrl, { cache: 'no-store' });
               const m = await res.json();
-              const currentReplicas = Number(m.hpa.currentReplicas || 0);
-              document.getElementById('replicas').textContent =
-                `${m.deployment.readyReplicas || 0} / ${m.deployment.replicas || 0}`;
-              document.getElementById('desired').textContent =
-                `${m.hpa.currentReplicas || 0} / ${m.hpa.desiredReplicas || 0}`;
-              document.getElementById('cpuTotal').textContent = `${m.cpuTotalMillicores || 0} m`;
-              document.getElementById('cpuAvg').textContent = `${fmt(m.cpuAverageMillicoresPerPod)} m`;
-              document.getElementById('memTotal').textContent = `${fmt(m.memoryTotalMiB)} Mi`;
-              document.getElementById('memAvg').textContent = `${fmt(m.memoryAverageMiBPerPod)} Mi`;
-              document.getElementById('cpuFill').style.width =
-                `${Math.min(100, (Number(m.cpuAverageMillicoresPerPod || 0) / 250) * 100)}%`;
-              document.getElementById('memFill').style.width =
-                `${Math.min(100, (Number(m.memoryAverageMiBPerPod || 0) / 220) * 100)}%`;
-              push("cpuTotal", Number(m.cpuTotalMillicores || 0));
-              push("cpuAvg", Number(m.cpuAverageMillicoresPerPod || 0));
-              push("memAvg", Number(m.memoryAverageMiBPerPod || 0));
-              push("replicas", currentReplicas);
-              drawCharts();
-              document.getElementById('updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
-              document.getElementById('note').textContent =
-                `${m.note} Pods measured: ${m.podsMeasured || 0}.`;
-              document.getElementById('errors').textContent = (m.errors || []).join('\n');
+              m.ts = Date.now();
+              snapshots.push(m);
+              if (snapshots.length > HISTORY_SIZE) snapshots.shift();
+              refreshHistorySeries();
+              if (liveMode) {
+                renderSnapshot(snapshots.length - 1);
+              } else {
+                renderSnapshot(Number(slider.value || 0));
+              }
             } catch (e) {
               document.getElementById('errors').textContent = `dashboard error: ${e}`;
             }
           }
+
+          liveBtn.addEventListener("click", () => setLive(true));
+          prevBtn.addEventListener("click", () => {
+            setLive(false);
+            slider.value = String(Math.max(0, Number(slider.value || 0) - STEP_SIZE));
+            renderSnapshot(Number(slider.value || 0));
+          });
+          nextBtn.addEventListener("click", () => {
+            setLive(false);
+            slider.value = String(Math.min(Math.max(0, snapshots.length - 1), Number(slider.value || 0) + STEP_SIZE));
+            renderSnapshot(Number(slider.value || 0));
+          });
+          slider.addEventListener("input", () => {
+            setLive(false);
+            renderSnapshot(Number(slider.value || 0));
+          });
+
           setInterval(tick, 2000);
           tick();
         </script>
