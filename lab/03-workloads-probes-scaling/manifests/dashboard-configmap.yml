@@ -1,0 +1,273 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: load-dashboard-app
+  namespace: workloads-lab
+data:
+  app.py: |
+    import json
+    import os
+    import re
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    POD_LABEL_SELECTOR = os.getenv("POD_LABEL_SELECTOR", "app=autoscale-api")
+    DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "8080"))
+    NAMESPACE = os.getenv("POD_NAMESPACE", "workloads-lab")
+    TARGET_DEPLOYMENT = os.getenv("TARGET_DEPLOYMENT", "autoscale-api")
+    TARGET_HPA = os.getenv("TARGET_HPA", "autoscale-api")
+
+    SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
+    with open(f"{SA_DIR}/token", "r", encoding="utf-8") as f:
+      TOKEN = f.read().strip()
+    with open(f"{SA_DIR}/ca.crt", "rb") as f:
+      CA_CERT = f.read()
+
+    API_HOST = os.getenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+    API_PORT = os.getenv("KUBERNETES_SERVICE_PORT", "443")
+    BASE = f"https://{API_HOST}:{API_PORT}"
+
+    def parse_cpu_millicores(value: str) -> int:
+      if value.endswith("m"):
+        return int(value[:-1])
+      return int(float(value) * 1000)
+
+    def parse_memory_mib(value: str) -> float:
+      units = {
+        "Ki": 1.0 / 1024.0,
+        "Mi": 1.0,
+        "Gi": 1024.0,
+        "Ti": 1024.0 * 1024.0,
+        "K": 1.0 / 1000.0,
+        "M": 1.0,
+        "G": 1000.0,
+      }
+      for suffix, factor in units.items():
+        if value.endswith(suffix):
+          return float(value[: -len(suffix)]) * factor
+      if re.match(r"^[0-9]+$", value):
+        return float(value) / (1024.0 * 1024.0)
+      return 0.0
+
+    def kget(path: str):
+      req = urllib.request.Request(
+        f"{BASE}{path}",
+        headers={"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"},
+      )
+      ctx = None
+      try:
+        import ssl
+        ctx = ssl.create_default_context(cadata=CA_CERT.decode("utf-8", errors="ignore"))
+      except Exception:
+        pass
+      with urllib.request.urlopen(req, timeout=4, context=ctx) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+    def collect():
+      deploy = {"readyReplicas": 0, "replicas": 0}
+      hpa = {"currentReplicas": 0, "desiredReplicas": 0}
+      cpu_total_m = 0
+      mem_total_mib = 0.0
+      pod_count = 0
+      errors = []
+
+      try:
+        d = kget(f"/apis/apps/v1/namespaces/{NAMESPACE}/deployments/{TARGET_DEPLOYMENT}")
+        deploy["replicas"] = d.get("status", {}).get("replicas", 0) or 0
+        deploy["readyReplicas"] = d.get("status", {}).get("readyReplicas", 0) or 0
+      except Exception as e:
+        errors.append(f"deployment: {e}")
+
+      try:
+        h = kget(f"/apis/autoscaling/v2/namespaces/{NAMESPACE}/horizontalpodautoscalers/{TARGET_HPA}")
+        hpa["currentReplicas"] = h.get("status", {}).get("currentReplicas", 0) or 0
+        hpa["desiredReplicas"] = h.get("status", {}).get("desiredReplicas", 0) or 0
+      except Exception as e:
+        errors.append(f"hpa: {e}")
+
+      try:
+        selector = urllib.parse.quote(POD_LABEL_SELECTOR, safe="")
+        metrics = kget(f"/apis/metrics.k8s.io/v1beta1/namespaces/{NAMESPACE}/pods?labelSelector={selector}")
+        for item in metrics.get("items", []):
+          for c in item.get("containers", []):
+            cpu_total_m += parse_cpu_millicores(c.get("usage", {}).get("cpu", "0m"))
+            mem_total_mib += parse_memory_mib(c.get("usage", {}).get("memory", "0Mi"))
+          pod_count += 1
+      except urllib.error.HTTPError as e:
+        errors.append(f"metrics api unavailable: {e.code}")
+      except Exception as e:
+        errors.append(f"metrics: {e}")
+
+      avg_cpu_m = round(cpu_total_m / pod_count, 1) if pod_count else 0.0
+      avg_mem_mib = round(mem_total_mib / pod_count, 1) if pod_count else 0.0
+      return {
+        "deployment": deploy,
+        "hpa": hpa,
+        "podsMeasured": pod_count,
+        "cpuTotalMillicores": cpu_total_m,
+        "cpuAverageMillicoresPerPod": avg_cpu_m,
+        "memoryTotalMiB": round(mem_total_mib, 1),
+        "memoryAverageMiBPerPod": avg_mem_mib,
+        "note": "Per-pod averages should usually fall after scale-out under similar traffic.",
+        "errors": errors,
+      }
+
+    HTML = """<!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Load Dashboard</title>
+        <style>
+          :root {
+            --bg: #0b1220;
+            --card: rgba(15, 23, 42, 0.75);
+            --border: rgba(148, 163, 184, 0.25);
+            --text: #e2e8f0;
+            --muted: #94a3b8;
+            --accent: #22d3ee;
+            --good: #22c55e;
+            --warn: #f59e0b;
+          }
+          body {
+            margin: 0;
+            font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+            background: radial-gradient(1200px 800px at 20% -20%, #1d4ed8 0, transparent 50%), var(--bg);
+            color: var(--text);
+          }
+          .wrap { max-width: 1080px; margin: 28px auto; padding: 0 16px; }
+          .hero { display: flex; justify-content: space-between; align-items: end; gap: 12px; margin-bottom: 16px; }
+          .title { font-size: 30px; font-weight: 750; letter-spacing: -0.02em; }
+          .subtitle { color: var(--muted); margin-top: 6px; }
+          .pill {
+            border: 1px solid var(--border); background: var(--card); color: var(--accent);
+            border-radius: 999px; padding: 6px 12px; font-size: 12px;
+          }
+          .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+          .card {
+            border: 1px solid var(--border); background: var(--card); backdrop-filter: blur(6px);
+            border-radius: 14px; padding: 14px;
+          }
+          .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+          .value { margin-top: 8px; font-size: 34px; font-weight: 700; line-height: 1.1; }
+          .hint { color: var(--muted); margin-top: 8px; font-size: 12px; }
+          .bar { margin-top: 10px; height: 8px; border-radius: 999px; background: rgba(148,163,184,0.2); overflow: hidden; }
+          .fill { height: 100%; width: 0%; background: linear-gradient(90deg, #06b6d4, #22c55e); transition: width .3s ease; }
+          .footer { margin-top: 14px; color: var(--muted); font-size: 13px; }
+          .errors { margin-top: 12px; color: var(--warn); font-size: 13px; white-space: pre-wrap; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <div class="hero">
+            <div>
+              <div class="title">Autoscale Load Dashboard</div>
+              <div class="subtitle">Watch load and per-pod pressure while HPA scales out.</div>
+            </div>
+            <div class="pill" id="updated">Updating...</div>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <div class="label">Deployment replicas</div>
+              <div class="value" id="replicas">0</div>
+              <div class="hint">ready / total</div>
+            </div>
+            <div class="card">
+              <div class="label">HPA desired replicas</div>
+              <div class="value" id="desired">0</div>
+              <div class="hint">current / desired</div>
+            </div>
+            <div class="card">
+              <div class="label">Total CPU load</div>
+              <div class="value" id="cpuTotal">0 m</div>
+              <div class="hint">sum across measured pods</div>
+            </div>
+            <div class="card">
+              <div class="label">CPU per pod</div>
+              <div class="value" id="cpuAvg">0 m</div>
+              <div class="hint">this should trend down after scale-out</div>
+              <div class="bar"><div class="fill" id="cpuFill"></div></div>
+            </div>
+            <div class="card">
+              <div class="label">Total memory load</div>
+              <div class="value" id="memTotal">0 Mi</div>
+              <div class="hint">sum across measured pods</div>
+            </div>
+            <div class="card">
+              <div class="label">Memory per pod</div>
+              <div class="value" id="memAvg">0 Mi</div>
+              <div class="hint">this should trend down after scale-out</div>
+              <div class="bar"><div class="fill" id="memFill"></div></div>
+            </div>
+          </div>
+          <div class="footer" id="note"></div>
+          <div class="errors" id="errors"></div>
+        </div>
+        <script>
+          function fmt(n, d=1) { return Number(n || 0).toFixed(d); }
+          async function tick() {
+            try {
+              const res = await fetch('/api/metrics', { cache: 'no-store' });
+              const m = await res.json();
+              document.getElementById('replicas').textContent =
+                `${m.deployment.readyReplicas || 0} / ${m.deployment.replicas || 0}`;
+              document.getElementById('desired').textContent =
+                `${m.hpa.currentReplicas || 0} / ${m.hpa.desiredReplicas || 0}`;
+              document.getElementById('cpuTotal').textContent = `${m.cpuTotalMillicores || 0} m`;
+              document.getElementById('cpuAvg').textContent = `${fmt(m.cpuAverageMillicoresPerPod)} m`;
+              document.getElementById('memTotal').textContent = `${fmt(m.memoryTotalMiB)} Mi`;
+              document.getElementById('memAvg').textContent = `${fmt(m.memoryAverageMiBPerPod)} Mi`;
+              document.getElementById('cpuFill').style.width =
+                `${Math.min(100, (Number(m.cpuAverageMillicoresPerPod || 0) / 250) * 100)}%`;
+              document.getElementById('memFill').style.width =
+                `${Math.min(100, (Number(m.memoryAverageMiBPerPod || 0) / 220) * 100)}%`;
+              document.getElementById('updated').textContent = `Updated ${new Date().toLocaleTimeString()}`;
+              document.getElementById('note').textContent =
+                `${m.note} Pods measured: ${m.podsMeasured || 0}.`;
+              document.getElementById('errors').textContent = (m.errors || []).join('\n');
+            } catch (e) {
+              document.getElementById('errors').textContent = `dashboard error: ${e}`;
+            }
+          }
+          setInterval(tick, 2000);
+          tick();
+        </script>
+      </body>
+    </html>
+    """
+
+    class Handler(BaseHTTPRequestHandler):
+      @staticmethod
+      def normalize_path(path: str) -> str:
+        if path.startswith("/load-dashboard"):
+          stripped = path[len("/load-dashboard") :]
+          return stripped or "/"
+        return path
+
+      def do_GET(self):
+        path = self.normalize_path(self.path)
+        if path in ("/", "/index.html"):
+          self.send_response(200)
+          self.send_header("Content-Type", "text/html; charset=utf-8")
+          self.end_headers()
+          self.wfile.write(HTML.encode("utf-8"))
+          return
+        if path.startswith("/api/metrics"):
+          body = json.dumps(collect()).encode("utf-8")
+          self.send_response(200)
+          self.send_header("Content-Type", "application/json")
+          self.send_header("Cache-Control", "no-store")
+          self.end_headers()
+          self.wfile.write(body)
+          return
+        self.send_response(404)
+        self.end_headers()
+
+      def log_message(self, fmt, *args):
+        return
+
+    if __name__ == "__main__":
+      server = HTTPServer(("", DASHBOARD_PORT), Handler)
+      server.serve_forever()

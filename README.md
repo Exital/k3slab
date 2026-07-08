@@ -38,7 +38,7 @@ If a workshop or your own manifests create **NodePort** Services or **Ingress** 
 |-----|------------------|-------------------|
 | **kubectl Basics** (`01-kubectl-basics`) | `-p 3010:3010` | Workshop UI only |
 | **Deployment Basics** (`02-deployment-basics`) | `-p 3010:3010` **and** `-p 80:80` | **`http://<ingress-host>/ctf/`** (default **`http://localhost/ctf/`**) for the [simple-ctf](https://github.com/Exital/simple-ctf) app |
-| **Workloads, Probes, and Autoscaling** (`03-workloads-probes-scaling`) | `-p 3010:3010` | Workshop UI only (cluster-internal load test + HPA) |
+| **Workloads, Probes, and Autoscaling** (`03-workloads-probes-scaling`) | `-p 3010:3010` **and** `-p 80:80` | **`http://<ingress-host>/load-dashboard/`** + HPA challenge |
 
 Example for the deployment lab:
 

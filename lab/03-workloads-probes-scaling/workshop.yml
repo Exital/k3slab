@@ -108,6 +108,10 @@ tabs:
       description: |
         **Pager alert #3:** traffic spike incoming. Right now `autoscale-api` is fixed at 1 replica.
 
+        A load dashboard is now published over Ingress at:
+        **`http://<ingress-host>/load-dashboard/`** (default host is `localhost` on this machine).
+        Keep it open while you work — after autoscaling, the **per-pod CPU/memory** cards should drop.
+
         Create an HPA named **`autoscale-api`** for Deployment **`autoscale-api`** with:
         - min replicas: **1**
         - max replicas: **6**
@@ -119,6 +123,12 @@ tabs:
       poll_interval_seconds: 5
       setup:
         - run: |
+            kubectl apply -f manifests/dashboard-rbac.yml
+            kubectl apply -f manifests/dashboard-configmap.yml
+            kubectl apply -f manifests/dashboard-deployment.yml
+            kubectl apply -f manifests/dashboard-service.yml
+            kubectl apply -f manifests/dashboard-ingress.yml
+            kubectl rollout status deploy/load-dashboard --timeout=120s
             kubectl delete pod loadgen --ignore-not-found >/dev/null
             kubectl run loadgen --image=busybox:1.36 --restart=Never -- /bin/sh -c 'while true; do wget -q -O- http://autoscale-api >/dev/null; done'
       correct_message: |
@@ -141,6 +151,7 @@ tabs:
         - "Start with: `kubectl autoscale deployment autoscale-api --min=1 --max=6 --cpu-percent=50`"
         - "Then add memory target by editing/patching the HPA to API version autoscaling/v2 metrics format"
         - "`kubectl get hpa autoscale-api -o yaml`"
+        - "Open `http://localhost/load-dashboard/` and compare per-pod load before vs after scale-out"
 
     - id: question-hpa-scales
       type: question
@@ -213,3 +224,4 @@ tabs:
         If requests are missing or unrealistic, scaling decisions will be misleading.
 
         In this lab, `autoscale-api` includes CPU and memory requests so HPA can make useful decisions.
+        Open **`http://localhost/load-dashboard/`** during HPA steps to see per-pod load drop as replicas increase.
