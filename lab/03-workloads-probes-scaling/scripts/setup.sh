@@ -6,11 +6,11 @@ cd "$(dirname "$0")/.."
 # Ensure resource metrics exist for HPA and dashboard graphs.
 kubectl apply -f "https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml"
 ms_args="$(kubectl -n kube-system get deploy metrics-server -o jsonpath='{range .spec.template.spec.containers[0].args[*]}{.}{"\n"}{end}' 2>/dev/null || true)"
-if ! printf '%s\n' "$ms_args" | rg -qx -- '--kubelet-insecure-tls'; then
+if ! printf '%s\n' "$ms_args" | grep -qx -- '--kubelet-insecure-tls'; then
   kubectl -n kube-system patch deploy metrics-server --type=json \
     -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]' >/dev/null
 fi
-if ! printf '%s\n' "$ms_args" | rg -qx -- '--kubelet-preferred-address-types=InternalIP,Hostname,InternalDNS,ExternalDNS,ExternalIP'; then
+if ! printf '%s\n' "$ms_args" | grep -qx -- '--kubelet-preferred-address-types=InternalIP,Hostname,InternalDNS,ExternalDNS,ExternalIP'; then
   kubectl -n kube-system patch deploy metrics-server --type=json \
     -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-preferred-address-types=InternalIP,Hostname,InternalDNS,ExternalDNS,ExternalIP"}]' >/dev/null
 fi

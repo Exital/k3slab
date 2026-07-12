@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen
+  namespace: workloads-lab
+  labels:
+    app: loadgen
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: loadgen
+  template:
+    metadata:
+      labels:
+        app: loadgen
+    spec:
+      containers:
+        - name: loadgen
+          image: busybox:1.36
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # Continuous request flood (official HPA walkthrough style).
+              # Batch+wait load leaves idle gaps that keep average CPU under target.
+              while true; do
+                wget -q -O- http://autoscale-api >/dev/null || true
+              done
