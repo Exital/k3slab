@@ -317,7 +317,7 @@ data:
         </div>
       </aside>
 
-      <main class="md:ml-64 pt-20 p-4 md:p-margin-desktop min-h-screen">
+      <main class="md:ml-64 min-h-screen px-4 pb-4 pt-20 md:px-margin-desktop md:pb-margin-desktop md:pt-24">
         <div class="max-w-container-max mx-auto space-y-stack-lg">
           <div class="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-4">
             <div>
