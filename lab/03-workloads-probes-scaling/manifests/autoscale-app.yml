@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: autoscale-api
+  namespace: workloads-lab
+  labels:
+    app: autoscale-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: autoscale-api
+  template:
+    metadata:
+      labels:
+        app: autoscale-api
+    spec:
+      containers:
+        - name: autoscale-api
+          image: registry.k8s.io/hpa-example
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: autoscale-api
+  namespace: workloads-lab
+spec:
+  selector:
+    app: autoscale-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80

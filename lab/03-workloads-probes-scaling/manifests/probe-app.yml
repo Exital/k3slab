@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: probe-app
+  namespace: workloads-lab
+  labels:
+    app: probe-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: probe-app
+  template:
+    metadata:
+      labels:
+        app: probe-app
+    spec:
+      containers:
+        - name: probe-app
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 80
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 1
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 80
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 1

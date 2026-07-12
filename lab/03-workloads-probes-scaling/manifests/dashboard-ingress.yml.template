@@ -1,0 +1,17 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: load-dashboard
+  namespace: workloads-lab
+spec:
+  rules:
+    - host: ${K3SLAB_INGRESS_HOST}
+      http:
+        paths:
+          - path: /load-dashboard
+            pathType: Prefix
+            backend:
+              service:
+                name: load-dashboard
+                port:
+                  number: 80

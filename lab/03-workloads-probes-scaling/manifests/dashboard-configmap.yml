@@ -1,0 +1,465 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: load-dashboard-app
+  namespace: workloads-lab
+data:
+  app.py: |
+    import json
+    import os
+    import re
+    import ssl
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    POD_LABEL_SELECTOR = os.getenv("POD_LABEL_SELECTOR", "app=autoscale-api")
+    DASHBOARD_PORT = int(os.getenv("DASHBOARD_PORT", "8080"))
+    NAMESPACE = os.getenv("POD_NAMESPACE", "workloads-lab")
+    TARGET_DEPLOYMENT = os.getenv("TARGET_DEPLOYMENT", "autoscale-api")
+    TARGET_HPA = os.getenv("TARGET_HPA", "autoscale-api")
+
+    SA_DIR = "/var/run/secrets/kubernetes.io/serviceaccount"
+    with open(f"{SA_DIR}/token", "r", encoding="utf-8") as f:
+      TOKEN = f.read().strip()
+    CA_FILE = f"{SA_DIR}/ca.crt"
+
+    API_HOST = os.getenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+    API_PORT = os.getenv("KUBERNETES_SERVICE_PORT", "443")
+    BASE = f"https://{API_HOST}:{API_PORT}"
+
+    def parse_cpu_millicores(value: str) -> int:
+      if value.endswith("n"):
+        return int(round(int(value[:-1]) / 1000000.0))
+      if value.endswith("u"):
+        return int(round(int(value[:-1]) / 1000.0))
+      if value.endswith("m"):
+        return int(value[:-1])
+      return int(float(value) * 1000)
+
+    def parse_memory_mib(value: str) -> float:
+      units = {
+        "Ki": 1.0 / 1024.0,
+        "Mi": 1.0,
+        "Gi": 1024.0,
+        "Ti": 1024.0 * 1024.0,
+        "K": 1.0 / 1000.0,
+        "M": 1.0,
+        "G": 1000.0,
+      }
+      for suffix, factor in units.items():
+        if value.endswith(suffix):
+          return float(value[: -len(suffix)]) * factor
+      if re.match(r"^[0-9]+$", value):
+        return float(value) / (1024.0 * 1024.0)
+      return 0.0
+
+    SSL_CTX = ssl.create_default_context(cafile=CA_FILE)
+
+    def kget(path: str):
+      req = urllib.request.Request(
+        f"{BASE}{path}",
+        headers={"Authorization": f"Bearer {TOKEN}", "Accept": "application/json"},
+      )
+      with urllib.request.urlopen(req, timeout=4, context=SSL_CTX) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+    def collect():
+      deploy = {"readyReplicas": 0, "replicas": 0}
+      hpa = {"currentReplicas": 0, "desiredReplicas": 0}
+      cpu_total_m = 0
+      mem_total_mib = 0.0
+      pod_count = 0
+      errors = []
+
+      try:
+        d = kget(f"/apis/apps/v1/namespaces/{NAMESPACE}/deployments/{TARGET_DEPLOYMENT}")
+        deploy["replicas"] = d.get("status", {}).get("replicas", 0) or 0
+        deploy["readyReplicas"] = d.get("status", {}).get("readyReplicas", 0) or 0
+      except Exception as e:
+        errors.append(f"deployment: {e}")
+
+      try:
+        h = kget(f"/apis/autoscaling/v2/namespaces/{NAMESPACE}/horizontalpodautoscalers/{TARGET_HPA}")
+        hpa["currentReplicas"] = h.get("status", {}).get("currentReplicas", 0) or 0
+        hpa["desiredReplicas"] = h.get("status", {}).get("desiredReplicas", 0) or 0
+      except Exception as e:
+        errors.append(f"hpa: {e}")
+
+      try:
+        selector = urllib.parse.quote(POD_LABEL_SELECTOR, safe="")
+        metrics = kget(f"/apis/metrics.k8s.io/v1beta1/namespaces/{NAMESPACE}/pods?labelSelector={selector}")
+        for item in metrics.get("items", []):
+          for c in item.get("containers", []):
+            cpu_total_m += parse_cpu_millicores(c.get("usage", {}).get("cpu", "0m"))
+            mem_total_mib += parse_memory_mib(c.get("usage", {}).get("memory", "0Mi"))
+          pod_count += 1
+      except urllib.error.HTTPError as e:
+        errors.append(f"metrics api unavailable: {e.code}")
+      except Exception as e:
+        errors.append(f"metrics: {e}")
+
+      avg_cpu_m = round(cpu_total_m / pod_count, 1) if pod_count else 0.0
+      avg_mem_mib = round(mem_total_mib / pod_count, 1) if pod_count else 0.0
+      return {
+        "deployment": deploy,
+        "hpa": hpa,
+        "podsMeasured": pod_count,
+        "cpuTotalMillicores": cpu_total_m,
+        "cpuAverageMillicoresPerPod": avg_cpu_m,
+        "memoryTotalMiB": round(mem_total_mib, 1),
+        "memoryAverageMiBPerPod": avg_mem_mib,
+        "note": "Per-pod averages should usually fall after scale-out under similar traffic.",
+        "errors": errors,
+      }
+
+    HTML = """<!doctype html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Load Dashboard</title>
+        <style>
+          :root {
+            --bg: #070b16;
+            --card: linear-gradient(160deg, rgba(16, 24, 42, 0.86), rgba(11, 18, 32, 0.86));
+            --border: rgba(148, 163, 184, 0.2);
+            --text: #e2e8f0;
+            --muted: #91a0bb;
+            --accent: #22d3ee;
+            --accent-2: #818cf8;
+            --good: #22c55e;
+            --warn: #f59e0b;
+          }
+          body {
+            margin: 0;
+            font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+            background:
+              radial-gradient(1200px 900px at 8% -25%, #1d4ed8 0, transparent 45%),
+              radial-gradient(800px 600px at 90% -20%, #0ea5e9 0, transparent 35%),
+              var(--bg);
+            color: var(--text);
+          }
+          .wrap { max-width: 1180px; margin: 22px auto; padding: 0 16px; }
+          .hero { display: flex; justify-content: space-between; align-items: end; gap: 12px; margin-bottom: 16px; }
+          .title { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; }
+          .subtitle { color: var(--muted); margin-top: 4px; }
+          .kicker { color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; }
+          .pill {
+            border: 1px solid var(--border); background: var(--card); color: var(--accent);
+            border-radius: 999px; padding: 6px 12px; font-size: 12px;
+          }
+          .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+          .graphs { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
+          .card {
+            border: 1px solid var(--border); background: var(--card); backdrop-filter: blur(6px);
+            border-radius: 14px; padding: 14px;
+          }
+          .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+          .value { margin-top: 8px; font-size: 34px; font-weight: 700; line-height: 1.1; }
+          .hint { color: var(--muted); margin-top: 8px; font-size: 12px; }
+          .bar { margin-top: 10px; height: 8px; border-radius: 999px; background: rgba(148,163,184,0.2); overflow: hidden; }
+          .fill { height: 100%; width: 0%; background: linear-gradient(90deg, #06b6d4, #22c55e); transition: width .3s ease; }
+          .chart-wrap { margin-top: 10px; border-radius: 10px; overflow: hidden; border: 1px solid rgba(148,163,184,0.15); background: rgba(2,6,23,0.5); }
+          .chart { width: 100%; height: 170px; display: block; }
+          .line-a { stroke: #22d3ee; fill: none; stroke-width: 3; }
+          .line-b { stroke: #34d399; fill: none; stroke-width: 2; opacity: .95; }
+          .line-c { stroke: #818cf8; fill: none; stroke-width: 2; opacity: .95; }
+          .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
+          .dot { display: inline-block; width: 10px; height: 10px; border-radius: 999px; margin-right: 6px; }
+          .controls {
+            margin: 12px 0 6px;
+            border: 1px solid var(--border);
+            background: var(--card);
+            border-radius: 14px;
+            padding: 10px 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+          }
+          .btn {
+            background: rgba(15,23,42,0.7);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 10px;
+            padding: 6px 10px;
+            font-size: 12px;
+            cursor: pointer;
+          }
+          .btn.active {
+            border-color: rgba(34,211,238,0.6);
+            color: var(--accent);
+          }
+          .slider-wrap { flex: 1; min-width: 220px; }
+          .slider-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
+          input[type=range] { width: 100%; }
+          .footer { margin-top: 10px; color: var(--muted); font-size: 13px; }
+          .errors { margin-top: 12px; color: var(--warn); font-size: 13px; white-space: pre-wrap; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <div class="hero">
+            <div>
+              <div class="kicker">k3slab incident telemetry</div>
+              <div class="title">Autoscale Load Dashboard</div>
+              <div class="subtitle">Track total load vs per-pod pressure and watch graphs react after scale-out.</div>
+            </div>
+            <div class="pill" id="updated">Updating...</div>
+          </div>
+          <div class="controls">
+            <button class="btn active" id="liveBtn" type="button">Live</button>
+            <button class="btn" id="prevBtn" type="button">-10s</button>
+            <button class="btn" id="nextBtn" type="button">+10s</button>
+            <div class="slider-wrap">
+              <div class="slider-label">
+                <span>Timeline window (3 minutes)</span>
+                <span id="timelineInfo">Waiting for samples...</span>
+              </div>
+              <input id="timelineSlider" type="range" min="0" max="0" value="0" step="1" />
+            </div>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <div class="label">Deployment replicas</div>
+              <div class="value" id="replicas">0</div>
+              <div class="hint">ready / total</div>
+            </div>
+            <div class="card">
+              <div class="label">HPA desired replicas</div>
+              <div class="value" id="desired">0</div>
+              <div class="hint">current / desired</div>
+            </div>
+            <div class="card">
+              <div class="label">Total CPU load</div>
+              <div class="value" id="cpuTotal">0 m</div>
+              <div class="hint">sum across measured pods</div>
+            </div>
+            <div class="card">
+              <div class="label">CPU per pod</div>
+              <div class="value" id="cpuAvg">0 m</div>
+              <div class="hint">this should trend down after scale-out</div>
+              <div class="bar"><div class="fill" id="cpuFill"></div></div>
+            </div>
+            <div class="card">
+              <div class="label">Total memory load</div>
+              <div class="value" id="memTotal">0 Mi</div>
+              <div class="hint">sum across measured pods</div>
+            </div>
+            <div class="card">
+              <div class="label">Memory per pod</div>
+              <div class="value" id="memAvg">0 Mi</div>
+              <div class="hint">this should trend down after scale-out</div>
+              <div class="bar"><div class="fill" id="memFill"></div></div>
+            </div>
+          </div>
+          <div class="graphs">
+            <div class="card">
+              <div class="label">CPU trend (last ~3 min)</div>
+              <div class="chart-wrap">
+                <svg class="chart" viewBox="0 0 600 170" preserveAspectRatio="none">
+                  <polyline id="cpuTotalLine" class="line-a" points=""></polyline>
+                  <polyline id="cpuAvgLine" class="line-b" points=""></polyline>
+                </svg>
+              </div>
+              <div class="legend">
+                <span><span class="dot" style="background:#22d3ee"></span>Total CPU (m)</span>
+                <span><span class="dot" style="background:#34d399"></span>CPU per pod (m)</span>
+              </div>
+            </div>
+            <div class="card">
+              <div class="label">Memory + replicas trend (last ~3 min)</div>
+              <div class="chart-wrap">
+                <svg class="chart" viewBox="0 0 600 170" preserveAspectRatio="none">
+                  <polyline id="memAvgLine" class="line-a" points=""></polyline>
+                  <polyline id="replicaLine" class="line-c" points=""></polyline>
+                </svg>
+              </div>
+              <div class="legend">
+                <span><span class="dot" style="background:#22d3ee"></span>Memory per pod (Mi)</span>
+                <span><span class="dot" style="background:#818cf8"></span>Current replicas</span>
+              </div>
+            </div>
+          </div>
+          <div class="footer" id="note"></div>
+          <div class="errors" id="errors"></div>
+        </div>
+        <script>
+          const history = { cpuTotal: [], cpuAvg: [], memAvg: [], replicas: [] };
+          const snapshots = [];
+          const HISTORY_SIZE = 90; // 3 minutes @ 2s interval
+          const STEP_SIZE = 5; // ~10 seconds
+          let liveMode = true;
+          const slider = document.getElementById("timelineSlider");
+          const timelineInfo = document.getElementById("timelineInfo");
+          const liveBtn = document.getElementById("liveBtn");
+          const prevBtn = document.getElementById("prevBtn");
+          const nextBtn = document.getElementById("nextBtn");
+          const normalizedBase = window.location.href.endsWith("/")
+            ? window.location.href
+            : `${window.location.href}/`;
+          const apiUrl = new URL("api/metrics", normalizedBase).toString();
+
+          function fmt(n, d=1) { return Number(n || 0).toFixed(d); }
+
+          function push(name, value) {
+            history[name].push(Number(value || 0));
+            if (history[name].length > HISTORY_SIZE) history[name].shift();
+          }
+
+          function seriesToPoints(values, maxY) {
+            if (!values.length) return "";
+            const w = 600;
+            const h = 170;
+            const step = values.length <= 1 ? 0 : w / (values.length - 1);
+            return values.map((v, i) => {
+              const x = i * step;
+              const y = h - (Math.max(0, Math.min(maxY, v)) / maxY) * (h - 4) - 2;
+              return `${x.toFixed(1)},${y.toFixed(1)}`;
+            }).join(" ");
+          }
+
+          function drawCharts() {
+            const cpuMax = Math.max(50, ...history.cpuTotal, ...history.cpuAvg);
+            const mixedMax = Math.max(20, ...history.memAvg, ...history.replicas.map((r) => r * 40));
+            document.getElementById("cpuTotalLine").setAttribute("points", seriesToPoints(history.cpuTotal, cpuMax));
+            document.getElementById("cpuAvgLine").setAttribute("points", seriesToPoints(history.cpuAvg, cpuMax));
+            document.getElementById("memAvgLine").setAttribute("points", seriesToPoints(history.memAvg, mixedMax));
+            document.getElementById("replicaLine").setAttribute(
+              "points",
+              seriesToPoints(history.replicas.map((r) => r * 40), mixedMax),
+            );
+          }
+
+          function setLive(enabled) {
+            liveMode = enabled;
+            if (enabled) {
+              liveBtn.classList.add("active");
+              slider.value = String(Math.max(0, snapshots.length - 1));
+            } else {
+              liveBtn.classList.remove("active");
+            }
+          }
+
+          function renderSnapshot(index) {
+            if (!snapshots.length) return;
+            const idx = Math.max(0, Math.min(index, snapshots.length - 1));
+            const m = snapshots[idx];
+            const currentReplicas = Number(m.hpa.currentReplicas || 0);
+            document.getElementById('replicas').textContent =
+              `${m.deployment.readyReplicas || 0} / ${m.deployment.replicas || 0}`;
+            document.getElementById('desired').textContent =
+              `${m.hpa.currentReplicas || 0} / ${m.hpa.desiredReplicas || 0}`;
+            document.getElementById('cpuTotal').textContent = `${m.cpuTotalMillicores || 0} m`;
+            document.getElementById('cpuAvg').textContent = `${fmt(m.cpuAverageMillicoresPerPod)} m`;
+            document.getElementById('memTotal').textContent = `${fmt(m.memoryTotalMiB)} Mi`;
+            document.getElementById('memAvg').textContent = `${fmt(m.memoryAverageMiBPerPod)} Mi`;
+            document.getElementById('cpuFill').style.width =
+              `${Math.min(100, (Number(m.cpuAverageMillicoresPerPod || 0) / 250) * 100)}%`;
+            document.getElementById('memFill').style.width =
+              `${Math.min(100, (Number(m.memoryAverageMiBPerPod || 0) / 220) * 100)}%`;
+            document.getElementById('note').textContent =
+              `${m.note} Pods measured: ${m.podsMeasured || 0}.`;
+            document.getElementById('errors').textContent = (m.errors || []).join('\\n');
+            const modeText = liveMode ? "LIVE" : "REPLAY";
+            document.getElementById('updated').textContent =
+              `${modeText} @ ${new Date(m.ts).toLocaleTimeString()}`;
+            timelineInfo.textContent = `${idx + 1}/${snapshots.length} • replicas ${currentReplicas}`;
+            slider.value = String(idx);
+            refreshHistorySeries();
+          }
+
+          function refreshHistorySeries() {
+            slider.max = String(Math.max(0, snapshots.length - 1));
+            const endIdx = Number(liveMode ? snapshots.length - 1 : (slider.value || 0));
+            const safeEnd = Math.max(0, Math.min(endIdx, snapshots.length - 1));
+            const startIdx = Math.max(0, safeEnd - HISTORY_SIZE + 1);
+            const windowSnaps = snapshots.slice(startIdx, safeEnd + 1);
+            history.cpuTotal = windowSnaps.map((s) => Number(s.cpuTotalMillicores || 0));
+            history.cpuAvg = windowSnaps.map((s) => Number(s.cpuAverageMillicoresPerPod || 0));
+            history.memAvg = windowSnaps.map((s) => Number(s.memoryAverageMiBPerPod || 0));
+            history.replicas = windowSnaps.map((s) => Number(s.hpa.currentReplicas || 0));
+            drawCharts();
+          }
+
+          async function tick() {
+            try {
+              const res = await fetch(apiUrl, { cache: 'no-store' });
+              const m = await res.json();
+              m.ts = Date.now();
+              snapshots.push(m);
+              if (snapshots.length > HISTORY_SIZE) snapshots.shift();
+              refreshHistorySeries();
+              if (liveMode) {
+                renderSnapshot(snapshots.length - 1);
+              } else {
+                renderSnapshot(Number(slider.value || 0));
+              }
+            } catch (e) {
+              document.getElementById('errors').textContent = `dashboard error: ${e}`;
+            }
+          }
+
+          liveBtn.addEventListener("click", () => setLive(true));
+          prevBtn.addEventListener("click", () => {
+            setLive(false);
+            slider.value = String(Math.max(0, Number(slider.value || 0) - STEP_SIZE));
+            renderSnapshot(Number(slider.value || 0));
+          });
+          nextBtn.addEventListener("click", () => {
+            setLive(false);
+            slider.value = String(Math.min(Math.max(0, snapshots.length - 1), Number(slider.value || 0) + STEP_SIZE));
+            renderSnapshot(Number(slider.value || 0));
+          });
+          slider.addEventListener("input", () => {
+            setLive(false);
+            renderSnapshot(Number(slider.value || 0));
+          });
+
+          setInterval(tick, 2000);
+          tick();
+        </script>
+      </body>
+    </html>
+    """
+
+    class Handler(BaseHTTPRequestHandler):
+      @staticmethod
+      def normalize_path(path: str) -> str:
+        if path.startswith("/load-dashboard"):
+          stripped = path[len("/load-dashboard") :]
+          return stripped or "/"
+        return path
+
+      def do_GET(self):
+        if self.path == "/load-dashboard":
+          self.send_response(301)
+          self.send_header("Location", "/load-dashboard/")
+          self.end_headers()
+          return
+        path = self.normalize_path(self.path)
+        if path in ("/", "/index.html"):
+          self.send_response(200)
+          self.send_header("Content-Type", "text/html; charset=utf-8")
+          self.end_headers()
+          self.wfile.write(HTML.encode("utf-8"))
+          return
+        if path.startswith("/api/metrics"):
+          body = json.dumps(collect()).encode("utf-8")
+          self.send_response(200)
+          self.send_header("Content-Type", "application/json")
+          self.send_header("Cache-Control", "no-store")
+          self.end_headers()
+          self.wfile.write(body)
+          return
+        self.send_response(404)
+        self.end_headers()
+
+      def log_message(self, fmt, *args):
+        return
+
+    if __name__ == "__main__":
+      server = HTTPServer(("", DASHBOARD_PORT), Handler)
+      server.serve_forever()
