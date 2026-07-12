@@ -114,314 +114,486 @@ data:
         "errors": errors,
       }
 
-    HTML = """<!doctype html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Load Dashboard</title>
-        <style>
-          :root {
-            --bg: #070b16;
-            --card: linear-gradient(160deg, rgba(16, 24, 42, 0.86), rgba(11, 18, 32, 0.86));
-            --border: rgba(148, 163, 184, 0.2);
-            --text: #e2e8f0;
-            --muted: #91a0bb;
-            --accent: #22d3ee;
-            --accent-2: #818cf8;
-            --good: #22c55e;
-            --warn: #f59e0b;
+    HTML = """<!DOCTYPE html>
+    <html class="dark" lang="en">
+    <head>
+      <meta charset="utf-8"/>
+      <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+      <title>Nexus Dashboard - Autoscale Load</title>
+      <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+      <link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700;800&amp;family=Geist:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+      <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+      <script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              colors: {
+                "surface-dim": "#0b1326",
+                "surface-container": "#171f33",
+                "inverse-surface": "#dae2fd",
+                "on-tertiary-container": "#006645",
+                "on-surface-variant": "#bac9cc",
+                "primary": "#c3f5ff",
+                "on-tertiary-fixed": "#002113",
+                "surface": "#0b1326",
+                "on-error-container": "#ffdad6",
+                "on-background": "#dae2fd",
+                "secondary-fixed-dim": "#d0bcff",
+                "secondary-container": "#571bc1",
+                "tertiary-fixed-dim": "#4edea3",
+                "tertiary": "#a8ffd2",
+                "primary-fixed-dim": "#00daf3",
+                "primary-fixed": "#9cf0ff",
+                "tertiary-container": "#5be9ad",
+                "outline": "#849396",
+                "on-error": "#690005",
+                "inverse-on-surface": "#283044",
+                "tertiary-fixed": "#6ffbbe",
+                "on-secondary-fixed": "#23005c",
+                "on-primary": "#00363d",
+                "secondary": "#d0bcff",
+                "on-tertiary": "#003824",
+                "surface-container-high": "#222a3d",
+                "error": "#ffb4ab",
+                "on-tertiary-fixed-variant": "#005236",
+                "on-surface": "#dae2fd",
+                "on-primary-fixed-variant": "#004f58",
+                "surface-container-highest": "#2d3449",
+                "outline-variant": "#3b494c",
+                "on-secondary-container": "#c4abff",
+                "surface-variant": "#2d3449",
+                "on-secondary": "#3c0091",
+                "inverse-primary": "#006875",
+                "secondary-fixed": "#e9ddff",
+                "error-container": "#93000a",
+                "on-primary-container": "#00626e",
+                "primary-container": "#00e5ff",
+                "on-primary-fixed": "#001f24",
+                "background": "#0b1326",
+                "surface-bright": "#31394d",
+                "surface-tint": "#00daf3",
+                "surface-container-lowest": "#060e20",
+                "surface-container-low": "#131b2e",
+                "on-secondary-fixed-variant": "#5516be"
+              },
+              borderRadius: {
+                DEFAULT: "0.25rem",
+                lg: "0.5rem",
+                xl: "0.75rem",
+                full: "9999px"
+              },
+              spacing: {
+                "stack-sm": "0.5rem",
+                "stack-lg": "2rem",
+                "margin-mobile": "1rem",
+                "stack-md": "1rem",
+                "container-max": "1440px",
+                "margin-desktop": "2.5rem",
+                gutter: "1.5rem"
+              },
+              fontFamily: {
+                "headline-lg-mobile": ["Hanken Grotesk"],
+                "display-xl": ["Hanken Grotesk"],
+                "body-md": ["Hanken Grotesk"],
+                "headline-lg": ["Hanken Grotesk"],
+                "label-sm": ["Geist"],
+                "mono-data": ["Geist"],
+                "metric-value": ["Hanken Grotesk"]
+              },
+              fontSize: {
+                "headline-lg-mobile": ["24px", {lineHeight: "32px", fontWeight: "600"}],
+                "display-xl": ["48px", {lineHeight: "56px", letterSpacing: "-0.02em", fontWeight: "700"}],
+                "body-md": ["16px", {lineHeight: "24px", fontWeight: "400"}],
+                "headline-lg": ["32px", {lineHeight: "40px", fontWeight: "600"}],
+                "label-sm": ["12px", {lineHeight: "16px", letterSpacing: "0.05em", fontWeight: "600"}],
+                "mono-data": ["14px", {lineHeight: "20px", fontWeight: "500"}],
+                "metric-value": ["36px", {lineHeight: "44px", fontWeight: "700"}]
+              }
+            }
           }
-          body {
-            margin: 0;
-            font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-            background:
-              radial-gradient(1200px 900px at 8% -25%, #1d4ed8 0, transparent 45%),
-              radial-gradient(800px 600px at 90% -20%, #0ea5e9 0, transparent 35%),
-              var(--bg);
-            color: var(--text);
-          }
-          .wrap { max-width: 1180px; margin: 22px auto; padding: 0 16px; }
-          .hero { display: flex; justify-content: space-between; align-items: end; gap: 12px; margin-bottom: 16px; }
-          .title { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; }
-          .subtitle { color: var(--muted); margin-top: 4px; }
-          .kicker { color: var(--accent); font-size: 12px; text-transform: uppercase; letter-spacing: .1em; font-weight: 700; }
-          .pill {
-            border: 1px solid var(--border); background: var(--card); color: var(--accent);
-            border-radius: 999px; padding: 6px 12px; font-size: 12px;
-          }
-          .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-          .graphs { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
-          .card {
-            border: 1px solid var(--border); background: var(--card); backdrop-filter: blur(6px);
-            border-radius: 14px; padding: 14px;
-          }
-          .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
-          .value { margin-top: 8px; font-size: 34px; font-weight: 700; line-height: 1.1; }
-          .hint { color: var(--muted); margin-top: 8px; font-size: 12px; }
-          .bar { margin-top: 10px; height: 8px; border-radius: 999px; background: rgba(148,163,184,0.2); overflow: hidden; }
-          .fill { height: 100%; width: 0%; background: linear-gradient(90deg, #06b6d4, #22c55e); transition: width .3s ease; }
-          .chart-wrap { margin-top: 10px; border-radius: 10px; overflow: hidden; border: 1px solid rgba(148,163,184,0.15); background: rgba(2,6,23,0.5); }
-          .chart { width: 100%; height: 170px; display: block; }
-          .line-a { stroke: #22d3ee; fill: none; stroke-width: 3; }
-          .line-b { stroke: #34d399; fill: none; stroke-width: 2; opacity: .95; }
-          .line-c { stroke: #818cf8; fill: none; stroke-width: 2; opacity: .95; }
-          .legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 8px; }
-          .dot { display: inline-block; width: 10px; height: 10px; border-radius: 999px; margin-right: 6px; }
-          .controls {
-            margin: 12px 0 6px;
-            border: 1px solid var(--border);
-            background: var(--card);
-            border-radius: 14px;
-            padding: 10px 12px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            align-items: center;
-          }
-          .btn {
-            background: rgba(15,23,42,0.7);
-            border: 1px solid var(--border);
-            color: var(--text);
-            border-radius: 10px;
-            padding: 6px 10px;
-            font-size: 12px;
-            cursor: pointer;
-          }
-          .btn.active {
-            border-color: rgba(34,211,238,0.6);
-            color: var(--accent);
-          }
-          .slider-wrap { flex: 1; min-width: 220px; }
-          .slider-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
-          input[type=range] { width: 100%; }
-          .footer { margin-top: 10px; color: var(--muted); font-size: 13px; }
-          .errors { margin-top: 12px; color: var(--warn); font-size: 13px; white-space: pre-wrap; }
-        </style>
-      </head>
-      <body>
-        <div class="wrap">
-          <div class="hero">
-            <div>
-              <div class="kicker">k3slab incident telemetry</div>
-              <div class="title">Autoscale Load Dashboard</div>
-              <div class="subtitle">Track total load vs per-pod pressure and watch graphs react after scale-out.</div>
-            </div>
-            <div class="pill" id="updated">Updating...</div>
+        }
+      </script>
+      <style>
+        body {
+          background-color: #0b1326;
+          color: #dae2fd;
+          font-family: 'Hanken Grotesk', sans-serif;
+          overflow-x: hidden;
+        }
+        .glass-card {
+          background: rgba(23, 31, 51, 0.7);
+          backdrop-filter: blur(12px);
+          border: 1px solid rgba(59, 73, 76, 0.5);
+          transition: all 0.3s ease;
+        }
+        .glass-card:hover {
+          border-color: #00daf3;
+          box-shadow: 0 0 20px rgba(0, 218, 243, 0.15);
+        }
+        .metric-glow-cyan { text-shadow: 0 0 15px rgba(195, 245, 255, 0.4); }
+        .metric-glow-violet { text-shadow: 0 0 15px rgba(208, 188, 255, 0.4); }
+        .live-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0b1326; }
+        ::-webkit-scrollbar-thumb { background: #3b494c; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #849396; }
+        .chart-grid {
+          background-image:
+            linear-gradient(to right, rgba(132, 147, 150, 0.05) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(132, 147, 150, 0.05) 1px, transparent 1px);
+          background-size: 40px 40px;
+        }
+        .btn-chip {
+          background: rgba(45, 52, 73, 0.8);
+          border: 1px solid rgba(59, 73, 76, 0.8);
+          color: #bac9cc;
+          border-radius: 999px;
+          padding: 0.4rem 0.9rem;
+          font-size: 12px;
+          font-weight: 600;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          cursor: pointer;
+        }
+        .btn-chip.active {
+          border-color: rgba(0, 218, 243, 0.7);
+          color: #00daf3;
+          background: rgba(0, 218, 243, 0.08);
+        }
+        input[type=range] { width: 100%; accent-color: #00daf3; }
+      </style>
+    </head>
+    <body class="dark bg-surface-dim selection:bg-primary-container selection:text-on-primary-container">
+      <header class="fixed top-0 z-50 flex justify-between items-center w-full px-4 md:px-margin-desktop h-16 bg-surface-container border-b border-outline-variant shadow-sm">
+        <div class="flex items-center gap-8">
+          <div class="font-headline-lg text-xl md:text-headline-lg font-bold text-primary">Nexus Dashboard</div>
+          <nav class="hidden md:flex gap-6 items-center">
+            <a class="font-body-md text-body-md text-primary border-b-2 border-primary pb-1" href="#">Overview</a>
+            <a class="font-body-md text-body-md text-on-surface-variant" href="#">Infrastructure</a>
+            <a class="font-body-md text-body-md text-on-surface-variant" href="#">Analytics</a>
+          </nav>
+        </div>
+        <div class="flex items-center gap-3 bg-surface-container-high px-3 md:px-4 py-2 rounded-full border border-outline-variant">
+          <span class="w-2 h-2 bg-tertiary rounded-full live-pulse"></span>
+          <span class="text-label-sm font-label-sm text-tertiary uppercase tracking-widest">Live Status</span>
+          <span class="text-on-surface-variant font-mono-data text-mono-data ml-1 md:ml-2" id="updated">Synced: …</span>
+        </div>
+      </header>
+
+      <aside class="hidden md:flex flex-col h-screen fixed left-0 top-0 pt-20 pb-8 px-4 bg-surface-container-low border-r border-outline-variant w-64 z-40">
+        <div class="mb-8 px-2 flex items-center gap-3">
+          <div class="w-10 h-10 rounded-lg bg-primary-container flex items-center justify-center">
+            <span class="material-symbols-outlined text-on-primary-container" style="font-variation-settings: 'FILL' 1;">dashboard</span>
           </div>
-          <div class="controls">
-            <button class="btn active" id="liveBtn" type="button">Live</button>
-            <button class="btn" id="prevBtn" type="button">-10s</button>
-            <button class="btn" id="nextBtn" type="button">+10s</button>
-            <div class="slider-wrap">
-              <div class="slider-label">
+          <div>
+            <div class="font-body-md text-body-md text-primary font-bold">Cluster Health</div>
+            <div class="text-[10px] text-tertiary flex items-center gap-1">
+              <span class="w-1.5 h-1.5 bg-tertiary rounded-full live-pulse"></span>
+              workloads-lab
+            </div>
+          </div>
+        </div>
+        <nav class="flex-1 space-y-1">
+          <a class="flex items-center gap-3 px-3 py-2 bg-secondary-container text-on-secondary-container rounded-lg font-bold" href="#">
+            <span class="material-symbols-outlined">dashboard</span>
+            <span class="font-body-md text-body-md">Overview</span>
+          </a>
+          <a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant rounded-lg" href="#charts">
+            <span class="material-symbols-outlined">show_chart</span>
+            <span class="font-body-md text-body-md">Trends</span>
+          </a>
+          <a class="flex items-center gap-3 px-3 py-2 text-on-surface-variant rounded-lg" href="#events">
+            <span class="material-symbols-outlined">terminal</span>
+            <span class="font-body-md text-body-md">Events</span>
+          </a>
+        </nav>
+        <div class="mt-auto text-[11px] text-on-surface-variant px-2">
+          Target: <span class="text-primary font-mono-data">autoscale-api</span>
+        </div>
+      </aside>
+
+      <main class="md:ml-64 pt-20 p-4 md:p-margin-desktop min-h-screen">
+        <div class="max-w-container-max mx-auto space-y-stack-lg">
+          <div class="flex flex-col lg:flex-row lg:justify-between lg:items-end gap-4">
+            <div>
+              <h1 class="font-headline-lg text-2xl md:text-headline-lg text-on-surface">Autoscale Load Dashboard</h1>
+              <p class="text-on-surface-variant font-body-md">Watch total load vs per-pod pressure as HPA scales under traffic.</p>
+            </div>
+          </div>
+
+          <div class="glass-card rounded-xl p-4 flex flex-col lg:flex-row gap-4 items-stretch lg:items-center">
+            <div class="flex flex-wrap gap-2">
+              <button class="btn-chip active" id="liveBtn" type="button">Live</button>
+              <button class="btn-chip" id="prevBtn" type="button">-10s</button>
+              <button class="btn-chip" id="nextBtn" type="button">+10s</button>
+            </div>
+            <div class="flex-1 min-w-[220px]">
+              <div class="flex justify-between text-label-sm font-label-sm text-on-surface-variant mb-2 uppercase tracking-widest">
                 <span>Timeline window (3 minutes)</span>
-                <span id="timelineInfo">Waiting for samples...</span>
+                <span id="timelineInfo">Waiting for samples…</span>
               </div>
               <input id="timelineSlider" type="range" min="0" max="0" value="0" step="1" />
             </div>
           </div>
-          <div class="grid">
-            <div class="card">
-              <div class="label">Deployment replicas</div>
-              <div class="value" id="replicas">0</div>
-              <div class="hint">ready / total</div>
-            </div>
-            <div class="card">
-              <div class="label">HPA desired replicas</div>
-              <div class="value" id="desired">0</div>
-              <div class="hint">current / desired</div>
-            </div>
-            <div class="card">
-              <div class="label">Total CPU load</div>
-              <div class="value" id="cpuTotal">0 m</div>
-              <div class="hint">sum across measured pods</div>
-            </div>
-            <div class="card">
-              <div class="label">CPU per pod</div>
-              <div class="value" id="cpuAvg">0 m</div>
-              <div class="hint">this should trend down after scale-out</div>
-              <div class="bar"><div class="fill" id="cpuFill"></div></div>
-            </div>
-            <div class="card">
-              <div class="label">Total memory load</div>
-              <div class="value" id="memTotal">0 Mi</div>
-              <div class="hint">sum across measured pods</div>
-            </div>
-            <div class="card">
-              <div class="label">Memory per pod</div>
-              <div class="value" id="memAvg">0 Mi</div>
-              <div class="hint">this should trend down after scale-out</div>
-              <div class="bar"><div class="fill" id="memFill"></div></div>
-            </div>
-          </div>
-          <div class="graphs">
-            <div class="card">
-              <div class="label">CPU trend (last ~3 min)</div>
-              <div class="chart-wrap">
-                <svg class="chart" viewBox="0 0 600 170" preserveAspectRatio="none">
-                  <polyline id="cpuTotalLine" class="line-a" points=""></polyline>
-                  <polyline id="cpuAvgLine" class="line-b" points=""></polyline>
-                </svg>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-gutter">
+            <div class="glass-card p-4 rounded-xl flex flex-col justify-between h-32 relative overflow-hidden">
+              <div class="absolute -right-4 -top-4 opacity-10">
+                <span class="material-symbols-outlined text-6xl">layers</span>
               </div>
-              <div class="legend">
-                <span><span class="dot" style="background:#22d3ee"></span>Total CPU (m)</span>
-                <span><span class="dot" style="background:#34d399"></span>CPU per pod (m)</span>
+              <span class="text-label-sm font-label-sm text-on-surface-variant uppercase">Deployment Replicas</span>
+              <div class="font-metric-value text-metric-value text-primary metric-glow-cyan" id="replicas">0 / 0</div>
+              <div class="text-mono-data font-mono-data text-tertiary">ready / total</div>
+            </div>
+            <div class="glass-card p-4 rounded-xl flex flex-col justify-between h-32 relative overflow-hidden">
+              <span class="text-label-sm font-label-sm text-on-surface-variant uppercase">HPA Desired</span>
+              <div class="font-metric-value text-metric-value text-secondary metric-glow-violet" id="desired">0 / 0</div>
+              <div class="text-mono-data font-mono-data text-on-secondary-container">current / desired</div>
+            </div>
+            <div class="glass-card p-4 rounded-xl flex flex-col justify-between h-32 relative overflow-hidden">
+              <span class="text-label-sm font-label-sm text-on-surface-variant uppercase">Total CPU Load</span>
+              <div class="font-metric-value text-metric-value text-primary-fixed-dim" id="cpuTotal">0 m</div>
+              <div class="w-full bg-surface-dim h-1 rounded-full overflow-hidden mt-1">
+                <div class="bg-primary-container h-full transition-all duration-300" id="cpuTotalFill" style="width: 0%"></div>
               </div>
             </div>
-            <div class="card">
-              <div class="label">Memory + replicas trend (last ~3 min)</div>
-              <div class="chart-wrap">
-                <svg class="chart" viewBox="0 0 600 170" preserveAspectRatio="none">
-                  <polyline id="memAvgLine" class="line-a" points=""></polyline>
-                  <polyline id="replicaLine" class="line-c" points=""></polyline>
-                </svg>
+            <div class="glass-card p-4 rounded-xl flex flex-col justify-between h-32 relative overflow-hidden">
+              <span class="text-label-sm font-label-sm text-on-surface-variant uppercase">CPU per Pod</span>
+              <div class="font-metric-value text-metric-value text-primary" id="cpuAvg">0 m</div>
+              <div class="w-full bg-surface-dim h-1 rounded-full overflow-hidden mt-1">
+                <div class="bg-primary-container h-full transition-all duration-300" id="cpuFill" style="width: 0%"></div>
               </div>
-              <div class="legend">
-                <span><span class="dot" style="background:#22d3ee"></span>Memory per pod (Mi)</span>
-                <span><span class="dot" style="background:#818cf8"></span>Current replicas</span>
+            </div>
+            <div class="glass-card p-4 rounded-xl flex flex-col justify-between h-32 relative overflow-hidden">
+              <span class="text-label-sm font-label-sm text-on-surface-variant uppercase">Total Memory</span>
+              <div class="font-metric-value text-metric-value text-secondary-fixed-dim" id="memTotal">0 Mi</div>
+              <div class="text-mono-data font-mono-data text-on-surface-variant">sum across pods</div>
+            </div>
+            <div class="glass-card p-4 rounded-xl flex flex-col justify-between h-32 relative overflow-hidden">
+              <span class="text-label-sm font-label-sm text-on-surface-variant uppercase">Memory per Pod</span>
+              <div class="font-metric-value text-metric-value text-secondary" id="memAvg">0 Mi</div>
+              <div class="w-full bg-surface-dim h-1 rounded-full overflow-hidden mt-1">
+                <div class="bg-secondary-container h-full transition-all duration-300" id="memFill" style="width: 0%"></div>
               </div>
             </div>
           </div>
-          <div class="footer" id="note"></div>
-          <div class="errors" id="errors"></div>
+
+          <div id="charts" class="grid grid-cols-1 lg:grid-cols-2 gap-gutter">
+            <div class="glass-card p-6 rounded-xl space-y-6">
+              <div class="flex justify-between items-center">
+                <div>
+                  <h3 class="font-body-md text-body-md font-bold text-on-surface">CPU Trend (Last ~3 min)</h3>
+                  <p class="text-label-sm font-label-sm text-on-surface-variant">Total vs per-pod millicores</p>
+                </div>
+                <div class="flex gap-2">
+                  <span class="px-2 py-1 bg-surface-container-highest rounded text-[10px] text-primary border border-primary/20">TOTAL</span>
+                  <span class="px-2 py-1 bg-surface-container-highest rounded text-[10px] text-tertiary-fixed-dim border border-tertiary/20">PER POD</span>
+                </div>
+              </div>
+              <div class="h-64 w-full relative chart-grid border-l border-b border-outline-variant">
+                <svg class="w-full h-full drop-shadow-[0_0_8px_rgba(0,218,243,0.3)]" viewBox="0 0 600 170" preserveAspectRatio="none">
+                  <polyline id="cpuTotalLine" fill="none" points="" stroke="#00daf3" stroke-linecap="round" stroke-width="2.5"></polyline>
+                  <polyline id="cpuAvgLine" fill="none" points="" stroke="#4edea3" stroke-linecap="round" stroke-width="2"></polyline>
+                </svg>
+                <div class="absolute -bottom-6 left-0 right-0 flex justify-between text-[10px] text-on-surface-variant">
+                  <span>3m ago</span>
+                  <span>2m ago</span>
+                  <span>1m ago</span>
+                  <span>Now</span>
+                </div>
+              </div>
+            </div>
+            <div class="glass-card p-6 rounded-xl space-y-6">
+              <div class="flex justify-between items-center">
+                <div>
+                  <h3 class="font-body-md text-body-md font-bold text-on-surface">Memory + Replicas Trend</h3>
+                  <p class="text-label-sm font-label-sm text-on-surface-variant">Per-pod memory vs replica count</p>
+                </div>
+                <div class="flex items-center gap-4">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-3 h-0.5 bg-secondary rounded"></span>
+                    <span class="text-[10px] text-on-surface-variant uppercase">Memory</span>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-3 h-0.5 bg-tertiary rounded"></span>
+                    <span class="text-[10px] text-on-surface-variant uppercase">Replicas</span>
+                  </div>
+                </div>
+              </div>
+              <div class="h-64 w-full relative chart-grid border-l border-b border-outline-variant">
+                <svg class="w-full h-full" viewBox="0 0 600 170" preserveAspectRatio="none">
+                  <polyline id="memAvgLine" fill="none" points="" stroke="#d0bcff" stroke-dasharray="4 2" stroke-width="2"></polyline>
+                  <polyline id="replicaLine" fill="none" points="" stroke="#4edea3" stroke-width="3"></polyline>
+                </svg>
+                <div class="absolute -bottom-6 left-0 right-0 flex justify-between text-[10px] text-on-surface-variant">
+                  <span>3m ago</span>
+                  <span>2m ago</span>
+                  <span>1m ago</span>
+                  <span>Now</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="events" class="grid grid-cols-1 lg:grid-cols-3 gap-gutter">
+            <div class="lg:col-span-2 glass-card rounded-xl p-6 space-y-3">
+              <h4 class="font-body-md text-body-md font-bold text-on-surface">Operator Note</h4>
+              <p class="text-on-surface-variant font-body-md" id="note">Waiting for metrics…</p>
+            </div>
+            <div class="glass-card rounded-xl p-6 space-y-3">
+              <h4 class="font-body-md text-body-md font-bold text-on-surface">Errors</h4>
+              <pre class="text-[12px] text-error whitespace-pre-wrap font-mono-data min-h-[3rem]" id="errors">None</pre>
+            </div>
+          </div>
         </div>
-        <script>
-          const history = { cpuTotal: [], cpuAvg: [], memAvg: [], replicas: [] };
-          const snapshots = [];
-          const HISTORY_SIZE = 90; // 3 minutes @ 2s interval
-          const STEP_SIZE = 5; // ~10 seconds
-          let liveMode = true;
-          const slider = document.getElementById("timelineSlider");
-          const timelineInfo = document.getElementById("timelineInfo");
-          const liveBtn = document.getElementById("liveBtn");
-          const prevBtn = document.getElementById("prevBtn");
-          const nextBtn = document.getElementById("nextBtn");
-          const normalizedBase = window.location.href.endsWith("/")
-            ? window.location.href
-            : `${window.location.href}/`;
-          const apiUrl = new URL("api/metrics", normalizedBase).toString();
+      </main>
 
-          function fmt(n, d=1) { return Number(n || 0).toFixed(d); }
+      <script>
+        const history = { cpuTotal: [], cpuAvg: [], memAvg: [], replicas: [] };
+        const snapshots = [];
+        const HISTORY_SIZE = 90;
+        const STEP_SIZE = 5;
+        let liveMode = true;
+        const slider = document.getElementById("timelineSlider");
+        const timelineInfo = document.getElementById("timelineInfo");
+        const liveBtn = document.getElementById("liveBtn");
+        const prevBtn = document.getElementById("prevBtn");
+        const nextBtn = document.getElementById("nextBtn");
+        const normalizedBase = window.location.href.endsWith("/")
+          ? window.location.href
+          : `${window.location.href}/`;
+        const apiUrl = new URL("api/metrics", normalizedBase).toString();
 
-          function push(name, value) {
-            history[name].push(Number(value || 0));
-            if (history[name].length > HISTORY_SIZE) history[name].shift();
+        function fmt(n, d=1) { return Number(n || 0).toFixed(d); }
+
+        function seriesToPoints(values, maxY) {
+          if (!values.length) return "";
+          const w = 600;
+          const h = 170;
+          const step = values.length <= 1 ? 0 : w / (values.length - 1);
+          return values.map((v, i) => {
+            const x = i * step;
+            const y = h - (Math.max(0, Math.min(maxY, v)) / maxY) * (h - 4) - 2;
+            return `${x.toFixed(1)},${y.toFixed(1)}`;
+          }).join(" ");
+        }
+
+        function drawCharts() {
+          const cpuMax = Math.max(50, ...history.cpuTotal, ...history.cpuAvg);
+          const mixedMax = Math.max(20, ...history.memAvg, ...history.replicas.map((r) => r * 40));
+          document.getElementById("cpuTotalLine").setAttribute("points", seriesToPoints(history.cpuTotal, cpuMax));
+          document.getElementById("cpuAvgLine").setAttribute("points", seriesToPoints(history.cpuAvg, cpuMax));
+          document.getElementById("memAvgLine").setAttribute("points", seriesToPoints(history.memAvg, mixedMax));
+          document.getElementById("replicaLine").setAttribute(
+            "points",
+            seriesToPoints(history.replicas.map((r) => r * 40), mixedMax),
+          );
+        }
+
+        function setLive(enabled) {
+          liveMode = enabled;
+          if (enabled) {
+            liveBtn.classList.add("active");
+            slider.value = String(Math.max(0, snapshots.length - 1));
+          } else {
+            liveBtn.classList.remove("active");
           }
+        }
 
-          function seriesToPoints(values, maxY) {
-            if (!values.length) return "";
-            const w = 600;
-            const h = 170;
-            const step = values.length <= 1 ? 0 : w / (values.length - 1);
-            return values.map((v, i) => {
-              const x = i * step;
-              const y = h - (Math.max(0, Math.min(maxY, v)) / maxY) * (h - 4) - 2;
-              return `${x.toFixed(1)},${y.toFixed(1)}`;
-            }).join(" ");
-          }
+        function renderSnapshot(index) {
+          if (!snapshots.length) return;
+          const idx = Math.max(0, Math.min(index, snapshots.length - 1));
+          const m = snapshots[idx];
+          const currentReplicas = Number(m.hpa.currentReplicas || 0);
+          const cpuTotal = Number(m.cpuTotalMillicores || 0);
+          document.getElementById('replicas').textContent =
+            `${m.deployment.readyReplicas || 0} / ${m.deployment.replicas || 0}`;
+          document.getElementById('desired').textContent =
+            `${m.hpa.currentReplicas || 0} / ${m.hpa.desiredReplicas || 0}`;
+          document.getElementById('cpuTotal').textContent = `${cpuTotal} m`;
+          document.getElementById('cpuAvg').textContent = `${fmt(m.cpuAverageMillicoresPerPod)} m`;
+          document.getElementById('memTotal').textContent = `${fmt(m.memoryTotalMiB)} Mi`;
+          document.getElementById('memAvg').textContent = `${fmt(m.memoryAverageMiBPerPod)} Mi`;
+          document.getElementById('cpuFill').style.width =
+            `${Math.min(100, (Number(m.cpuAverageMillicoresPerPod || 0) / 250) * 100)}%`;
+          document.getElementById('cpuTotalFill').style.width =
+            `${Math.min(100, (cpuTotal / 1000) * 100)}%`;
+          document.getElementById('memFill').style.width =
+            `${Math.min(100, (Number(m.memoryAverageMiBPerPod || 0) / 220) * 100)}%`;
+          document.getElementById('note').textContent =
+            `${m.note} Pods measured: ${m.podsMeasured || 0}.`;
+          const errs = (m.errors || []).join('\\n');
+          document.getElementById('errors').textContent = errs || "None";
+          const modeText = liveMode ? "LIVE" : "REPLAY";
+          document.getElementById('updated').textContent =
+            `${modeText} @ ${new Date(m.ts).toLocaleTimeString()}`;
+          timelineInfo.textContent = `${idx + 1}/${snapshots.length} • replicas ${currentReplicas}`;
+          slider.value = String(idx);
+          refreshHistorySeries();
+        }
 
-          function drawCharts() {
-            const cpuMax = Math.max(50, ...history.cpuTotal, ...history.cpuAvg);
-            const mixedMax = Math.max(20, ...history.memAvg, ...history.replicas.map((r) => r * 40));
-            document.getElementById("cpuTotalLine").setAttribute("points", seriesToPoints(history.cpuTotal, cpuMax));
-            document.getElementById("cpuAvgLine").setAttribute("points", seriesToPoints(history.cpuAvg, cpuMax));
-            document.getElementById("memAvgLine").setAttribute("points", seriesToPoints(history.memAvg, mixedMax));
-            document.getElementById("replicaLine").setAttribute(
-              "points",
-              seriesToPoints(history.replicas.map((r) => r * 40), mixedMax),
-            );
-          }
+        function refreshHistorySeries() {
+          slider.max = String(Math.max(0, snapshots.length - 1));
+          const endIdx = Number(liveMode ? snapshots.length - 1 : (slider.value || 0));
+          const safeEnd = Math.max(0, Math.min(endIdx, snapshots.length - 1));
+          const startIdx = Math.max(0, safeEnd - HISTORY_SIZE + 1);
+          const windowSnaps = snapshots.slice(startIdx, safeEnd + 1);
+          history.cpuTotal = windowSnaps.map((s) => Number(s.cpuTotalMillicores || 0));
+          history.cpuAvg = windowSnaps.map((s) => Number(s.cpuAverageMillicoresPerPod || 0));
+          history.memAvg = windowSnaps.map((s) => Number(s.memoryAverageMiBPerPod || 0));
+          history.replicas = windowSnaps.map((s) => Number(s.hpa.currentReplicas || 0));
+          drawCharts();
+        }
 
-          function setLive(enabled) {
-            liveMode = enabled;
-            if (enabled) {
-              liveBtn.classList.add("active");
-              slider.value = String(Math.max(0, snapshots.length - 1));
-            } else {
-              liveBtn.classList.remove("active");
-            }
-          }
-
-          function renderSnapshot(index) {
-            if (!snapshots.length) return;
-            const idx = Math.max(0, Math.min(index, snapshots.length - 1));
-            const m = snapshots[idx];
-            const currentReplicas = Number(m.hpa.currentReplicas || 0);
-            document.getElementById('replicas').textContent =
-              `${m.deployment.readyReplicas || 0} / ${m.deployment.replicas || 0}`;
-            document.getElementById('desired').textContent =
-              `${m.hpa.currentReplicas || 0} / ${m.hpa.desiredReplicas || 0}`;
-            document.getElementById('cpuTotal').textContent = `${m.cpuTotalMillicores || 0} m`;
-            document.getElementById('cpuAvg').textContent = `${fmt(m.cpuAverageMillicoresPerPod)} m`;
-            document.getElementById('memTotal').textContent = `${fmt(m.memoryTotalMiB)} Mi`;
-            document.getElementById('memAvg').textContent = `${fmt(m.memoryAverageMiBPerPod)} Mi`;
-            document.getElementById('cpuFill').style.width =
-              `${Math.min(100, (Number(m.cpuAverageMillicoresPerPod || 0) / 250) * 100)}%`;
-            document.getElementById('memFill').style.width =
-              `${Math.min(100, (Number(m.memoryAverageMiBPerPod || 0) / 220) * 100)}%`;
-            document.getElementById('note').textContent =
-              `${m.note} Pods measured: ${m.podsMeasured || 0}.`;
-            document.getElementById('errors').textContent = (m.errors || []).join('\\n');
-            const modeText = liveMode ? "LIVE" : "REPLAY";
-            document.getElementById('updated').textContent =
-              `${modeText} @ ${new Date(m.ts).toLocaleTimeString()}`;
-            timelineInfo.textContent = `${idx + 1}/${snapshots.length} • replicas ${currentReplicas}`;
-            slider.value = String(idx);
+        async function tick() {
+          try {
+            const res = await fetch(apiUrl, { cache: 'no-store' });
+            const m = await res.json();
+            m.ts = Date.now();
+            snapshots.push(m);
+            if (snapshots.length > HISTORY_SIZE) snapshots.shift();
             refreshHistorySeries();
-          }
-
-          function refreshHistorySeries() {
-            slider.max = String(Math.max(0, snapshots.length - 1));
-            const endIdx = Number(liveMode ? snapshots.length - 1 : (slider.value || 0));
-            const safeEnd = Math.max(0, Math.min(endIdx, snapshots.length - 1));
-            const startIdx = Math.max(0, safeEnd - HISTORY_SIZE + 1);
-            const windowSnaps = snapshots.slice(startIdx, safeEnd + 1);
-            history.cpuTotal = windowSnaps.map((s) => Number(s.cpuTotalMillicores || 0));
-            history.cpuAvg = windowSnaps.map((s) => Number(s.cpuAverageMillicoresPerPod || 0));
-            history.memAvg = windowSnaps.map((s) => Number(s.memoryAverageMiBPerPod || 0));
-            history.replicas = windowSnaps.map((s) => Number(s.hpa.currentReplicas || 0));
-            drawCharts();
-          }
-
-          async function tick() {
-            try {
-              const res = await fetch(apiUrl, { cache: 'no-store' });
-              const m = await res.json();
-              m.ts = Date.now();
-              snapshots.push(m);
-              if (snapshots.length > HISTORY_SIZE) snapshots.shift();
-              refreshHistorySeries();
-              if (liveMode) {
-                renderSnapshot(snapshots.length - 1);
-              } else {
-                renderSnapshot(Number(slider.value || 0));
-              }
-            } catch (e) {
-              document.getElementById('errors').textContent = `dashboard error: ${e}`;
+            if (liveMode) {
+              renderSnapshot(snapshots.length - 1);
+            } else {
+              renderSnapshot(Number(slider.value || 0));
             }
+          } catch (e) {
+            document.getElementById('errors').textContent = `dashboard error: ${e}`;
           }
+        }
 
-          liveBtn.addEventListener("click", () => setLive(true));
-          prevBtn.addEventListener("click", () => {
-            setLive(false);
-            slider.value = String(Math.max(0, Number(slider.value || 0) - STEP_SIZE));
-            renderSnapshot(Number(slider.value || 0));
-          });
-          nextBtn.addEventListener("click", () => {
-            setLive(false);
-            slider.value = String(Math.min(Math.max(0, snapshots.length - 1), Number(slider.value || 0) + STEP_SIZE));
-            renderSnapshot(Number(slider.value || 0));
-          });
-          slider.addEventListener("input", () => {
-            setLive(false);
-            renderSnapshot(Number(slider.value || 0));
-          });
+        liveBtn.addEventListener("click", () => setLive(true));
+        prevBtn.addEventListener("click", () => {
+          setLive(false);
+          slider.value = String(Math.max(0, Number(slider.value || 0) - STEP_SIZE));
+          renderSnapshot(Number(slider.value || 0));
+        });
+        nextBtn.addEventListener("click", () => {
+          setLive(false);
+          slider.value = String(Math.min(Math.max(0, snapshots.length - 1), Number(slider.value || 0) + STEP_SIZE));
+          renderSnapshot(Number(slider.value || 0));
+        });
+        slider.addEventListener("input", () => {
+          setLive(false);
+          renderSnapshot(Number(slider.value || 0));
+        });
 
-          setInterval(tick, 2000);
-          tick();
-        </script>
-      </body>
+        document.querySelectorAll('.glass-card').forEach(card => {
+          card.addEventListener('mousedown', () => { card.style.transform = 'scale(0.98)'; });
+          card.addEventListener('mouseup', () => { card.style.transform = 'scale(1)'; });
+          card.addEventListener('mouseleave', () => { card.style.transform = 'scale(1)'; });
+        });
+
+        setInterval(tick, 2000);
+        tick();
+      </script>
+    </body>
     </html>
     """
 
