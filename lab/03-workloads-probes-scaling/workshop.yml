@@ -104,7 +104,7 @@ tabs:
 
     - id: question-hpa-create
       type: question
-      title: Enable HPA with CPU and memory
+      title: Enable HPA with CPU
       description: |
         **Pager alert #3:** traffic spike incoming. Right now `autoscale-api` is fixed at 1 replica.
 
@@ -117,9 +117,8 @@ tabs:
         - min replicas: **1**
         - max replicas: **6**
         - target CPU utilization: **50%**
-        - target memory utilization: **70%**
 
-        This challenge checks that both CPU and memory metrics are configured.
+        This challenge checks that the CPU metric is configured.
       answer_type: observe
       poll_interval_seconds: 5
       setup:
@@ -174,15 +173,11 @@ tabs:
         test "$max" = "6"
 
         cpu_target=$(kubectl get hpa autoscale-api -o jsonpath='{.spec.metrics[?(@.resource.name=="cpu")].resource.target.averageUtilization}' 2>/dev/null)
-        mem_target=$(kubectl get hpa autoscale-api -o jsonpath='{.spec.metrics[?(@.resource.name=="memory")].resource.target.averageUtilization}' 2>/dev/null)
         test "$cpu_target" = "50"
-        test "$mem_target" = "70"
       solution_script: |
         kubectl autoscale deployment autoscale-api --min=1 --max=6 --cpu-percent=50
-        kubectl patch hpa autoscale-api --type=merge -p '{"spec":{"metrics":[{"type":"Resource","resource":{"name":"cpu","target":{"type":"Utilization","averageUtilization":50}}},{"type":"Resource","resource":{"name":"memory","target":{"type":"Utilization","averageUtilization":70}}}]}}'
       hints:
-        - "Start with: `kubectl autoscale deployment autoscale-api --min=1 --max=6 --cpu-percent=50`"
-        - "Then add memory target by editing/patching the HPA to API version autoscaling/v2 metrics format"
+        - "`kubectl autoscale deployment autoscale-api --min=1 --max=6 --cpu-percent=50`"
         - "`kubectl get hpa autoscale-api -o yaml`"
         - "Open `http://localhost/load-dashboard/` and compare per-pod load before vs after scale-out"
 
@@ -285,8 +280,8 @@ tabs:
       content: |
         ## Why resource requests matter
 
-        HPA on CPU/memory compares observed usage against pod **requests**.
+        HPA on CPU compares observed usage against pod **requests**.
         If requests are missing or unrealistic, scaling decisions will be misleading.
 
-        In this lab, `autoscale-api` includes CPU and memory requests so HPA can make useful decisions.
+        In this lab, `autoscale-api` includes CPU requests so HPA can make useful decisions.
         Open **`http://localhost/load-dashboard/`** during HPA steps to see per-pod load drop as replicas increase.
