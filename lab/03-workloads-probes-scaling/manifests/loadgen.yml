@@ -6,7 +6,7 @@ metadata:
   labels:
     app: loadgen
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: loadgen
@@ -18,35 +18,27 @@ spec:
       containers:
         - name: loadgen
           image: busybox:1.36
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
           command:
             - /bin/sh
             - -c
             - |
-              # Growing load stream: start light, then ramp concurrency and shorten pauses
-              # so HPA pressure builds over ~1–2 minutes instead of spiking immediately.
-              level=1
-              max_level=32
-              tick=0
+              # Fixed in-flight concurrency: keep N requests busy, wait for the
+              # batch, then repeat. Fast hosts finish sooner and immediately start
+              # the next batch (usage stays high vs a tiny CPU request). Slow hosts
+              # never pile up more than N Apache workers (no OOM storm).
+              N=3
               while true; do
                 i=0
-                while [ "$i" -lt "$level" ]; do
+                while [ "$i" -lt "$N" ]; do
                   wget -q -O- http://autoscale-api >/dev/null &
                   i=$((i + 1))
                 done
-
-                if [ "$level" -le 4 ]; then
-                  sleep 1
-                elif [ "$level" -le 12 ]; then
-                  sleep 0.25
-                else
-                  sleep 0.05
-                fi
-
-                tick=$((tick + 1))
-                # Bump intensity roughly every 15 loop ticks.
-                if [ "$tick" -ge 15 ] && [ "$level" -lt "$max_level" ]; then
-                  level=$((level + 2))
-                  tick=0
-                  echo "loadgen intensity -> ${level} parallel requests/tick" >&2
-                fi
+                wait
               done

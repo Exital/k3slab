@@ -150,6 +150,7 @@ tabs:
       hints:
         - "`kubectl autoscale deployment autoscale-api --min=1 --max=6 --cpu-percent=50`"
         - "`kubectl get hpa autoscale-api -o yaml`"
+        - "HPA compares usage to the pod CPU **request** (10m here); the loadgen is light on purpose"
         - "Open `http://localhost/load-dashboard/` and compare per-pod load before vs after scale-out"
 
     - id: question-hpa-scales
@@ -196,28 +197,18 @@ tabs:
           [ "${current:-0}" -ge 2 ] || [ "${desired:-0}" -ge 2 ] || [ "${ready:-0}" -ge 2 ]
         }
 
-        # Prefer organic HPA scale-out under load.
-        for _ in $(seq 1 24); do
+        # Prefer organic HPA scale-out under bounded load (~3–4 min for metrics scrapes).
+        for _ in $(seq 1 48); do
           if scaled; then
             exit 0
           fi
           sleep 5
         done
 
-        # Constrained CI fallback: tiny request makes any traffic >> 50% target.
+        # Constrained fallback: tinier request makes any traffic >> 50% target.
         kubectl set resources deploy/autoscale-api -c autoscale-api --requests=cpu=1m,memory=32Mi
         kubectl rollout status deploy/autoscale-api --timeout=120s
-        for _ in $(seq 1 24); do
-          if scaled; then
-            exit 0
-          fi
-          sleep 5
-        done
-
-        # Last-resort deterministic trigger used only when metrics/load cannot drive HPA in time.
-        # Raising minReplicas forces desiredReplicas >= 2 so the observe verify can pass in CI.
-        kubectl patch hpa autoscale-api --type=merge -p '{"spec":{"minReplicas":2}}'
-        for _ in $(seq 1 12); do
+        for _ in $(seq 1 36); do
           if scaled; then
             exit 0
           fi
@@ -232,6 +223,7 @@ tabs:
       hints:
         - "HPA decisions need metrics; wait up to a couple of minutes after creating HPA"
         - "Check that metrics are available with `kubectl top pods`"
+        - "Loadgen is intentionally light (a few in-flight requests); scale-out comes from the small CPU request on autoscale-api"
         - "If needed, recreate the load generator: `kubectl apply -f manifests/loadgen.yml`"
 
   markdowns:
@@ -268,6 +260,7 @@ tabs:
           - `kubectl top pods`
         - Load generator:
           - `kubectl get deploy,pod -l app=loadgen`
+          - Load is intentionally light (a few in-flight requests); scale-out comes from the small CPU **request** on `autoscale-api`, not a traffic flood
 
     - id: hpa-note
       title: HPA note
@@ -275,8 +268,11 @@ tabs:
       content: |
         ## Why resource requests matter
 
-        HPA on CPU compares observed usage against pod **requests**.
+        HPA on CPU compares observed usage against pod **requests** (usage ÷ request), not against how big your laptop is.
         If requests are missing or unrealistic, scaling decisions will be misleading.
 
-        In this lab, `autoscale-api` includes CPU requests so HPA can make useful decisions.
+        In this lab, `autoscale-api` uses a **small CPU request (10m)** so a gentle, concurrency-bounded loadgen
+        can still push utilization above the 50% target on both weak and strong machines.
+        The loadgen keeps a few requests in flight at a time — enough to busy the app, not enough to OOM the node.
+
         Open **`http://localhost/load-dashboard/`** during HPA steps to see per-pod load drop as replicas increase.

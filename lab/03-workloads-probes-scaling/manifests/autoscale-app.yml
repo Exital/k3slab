@@ -22,8 +22,8 @@ spec:
             - containerPort: 80
           resources:
             requests:
-              # Keep this small so modest loadgen traffic exceeds the 50% HPA target
-              # even on constrained CI runners.
+              # Contract: loadgen keeps ~3 in-flight requests; with a 10m request that
+              # usage exceeds the 50% HPA target on both weak and strong hosts.
               cpu: "10m"
               memory: "32Mi"
             limits:
