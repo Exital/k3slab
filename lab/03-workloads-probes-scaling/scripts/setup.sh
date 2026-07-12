@@ -14,8 +14,14 @@ if ! printf '%s\n' "$ms_args" | grep -qx -- '--kubelet-preferred-address-types=I
   kubectl -n kube-system patch deploy metrics-server --type=json \
     -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-preferred-address-types=InternalIP,Hostname,InternalDNS,ExternalDNS,ExternalIP"}]' >/dev/null
 fi
+if ! printf '%s\n' "$ms_args" | grep -qx -- '--metric-resolution=15s'; then
+  kubectl -n kube-system patch deploy metrics-server --type=json \
+    -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--metric-resolution=15s"}]' >/dev/null
+fi
 kubectl -n kube-system rollout status deploy/metrics-server --timeout=180s
 kubectl wait --for=condition=Available apiservice/v1beta1.metrics.k8s.io --timeout=180s
+# Give metrics-server a moment to scrape before later HPA steps.
+sleep 5
 
 kubectl apply -f manifests/00-namespace.yml
 kubectl apply -f manifests/rollout-app.yml

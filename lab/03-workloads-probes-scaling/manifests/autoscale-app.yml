@@ -22,8 +22,10 @@ spec:
             - containerPort: 80
           resources:
             requests:
-              cpu: "50m"
-              memory: "64Mi"
+              # Keep this small so modest loadgen traffic exceeds the 50% HPA target
+              # even on constrained CI runners.
+              cpu: "10m"
+              memory: "32Mi"
             limits:
               cpu: "500m"
               memory: "256Mi"

@@ -22,8 +22,31 @@ spec:
             - /bin/sh
             - -c
             - |
-              # Continuous request flood (official HPA walkthrough style).
-              # Batch+wait load leaves idle gaps that keep average CPU under target.
+              # Growing load stream: start light, then ramp concurrency and shorten pauses
+              # so HPA pressure builds over ~1–2 minutes instead of spiking immediately.
+              level=1
+              max_level=32
+              tick=0
               while true; do
-                wget -q -O- http://autoscale-api >/dev/null || true
+                i=0
+                while [ "$i" -lt "$level" ]; do
+                  wget -q -O- http://autoscale-api >/dev/null &
+                  i=$((i + 1))
+                done
+
+                if [ "$level" -le 4 ]; then
+                  sleep 1
+                elif [ "$level" -le 12 ]; then
+                  sleep 0.25
+                else
+                  sleep 0.05
+                fi
+
+                tick=$((tick + 1))
+                # Bump intensity roughly every 15 loop ticks.
+                if [ "$tick" -ge 15 ] && [ "$level" -lt "$max_level" ]; then
+                  level=$((level + 2))
+                  tick=0
+                  echo "loadgen intensity -> ${level} parallel requests/tick" >&2
+                fi
               done
