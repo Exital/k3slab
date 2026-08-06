@@ -1,0 +1,448 @@
+name: Incident Drills
+description: "On-call capstone: fix ConfigMaps, Secrets, app wiring, rollouts, probes, and cluster infra."
+
+tabs:
+  steps:
+    - id: prepare-lab
+      type: task
+      title: Prepare the incident environment
+      run: bash scripts/setup.sh
+
+    - id: question-triage
+      type: question
+      title: Triage the outage
+      description: |
+        **Pager alert #1:** ShopStream checkout is down.
+
+        Namespace **`incident-lab`** runs the shop stack (**`web`** frontend + **`api`** backend).
+        Use **`kubectl get deploy,pods`** to see what is unhealthy.
+
+        Submit the **number of Deployments** in **`incident-lab`** that currently have **zero ready replicas**.
+      answer_type: text
+      correct_message: |
+        Correct — only **`api`** is fully down right now. **`web`** is still healthy.
+      verify: |
+        test "$ANSWER" = "1"
+      solution_answer: "1"
+      hints:
+        - "`kubectl get deploy -n incident-lab` — compare READY vs DESIRED"
+        - "Count Deployments where READY shows 0/N"
+
+    - id: question-api-image
+      type: question
+      title: Fix the API image pull failure
+      description: |
+        **Pager alert #2:** API pods cannot start — likely an image problem.
+
+        Inspect **`api`** pod events and fix the Deployment so Kubernetes pulls a real **`nginx:1.27-alpine`** tag (or another valid nginx tag).
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        Good — the API image is pulling and pods are starting again.
+      verify: |
+        img=$(kubectl get deploy api -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)
+        case "$img" in
+          nginx:*) ;;
+          *) exit 1 ;;
+        esac
+        tag="${img#nginx:}"
+        test -n "$tag"
+        test "$tag" != "not-a-real-tag"
+        reason=$(kubectl get pods -l app=api -o jsonpath='{.items[0].status.containerStatuses[0].state.waiting.reason}' 2>/dev/null || true)
+        test "$reason" != "ImagePullBackOff"
+        test "$reason" != "ErrImagePull"
+      solution_script: |
+        kubectl set image deploy/api api=nginx:1.27-alpine
+      hints:
+        - "`kubectl describe pod -l app=api` — look for ImagePullBackOff"
+        - "`kubectl set image deploy/api api=nginx:1.27-alpine`"
+
+    - id: question-configmap
+      type: question
+      title: Repair the API ConfigMap
+      description: |
+        **Pager alert #3:** API pods crash immediately after start.
+
+        The API reads **`mode`** from ConfigMap **`shop-api-config`**. Check **`kubectl logs`** — the startup script tells you what value it expects.
+
+        Fix the ConfigMap and restart the Deployment if needed.
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        ConfigMap repaired — the API accepts the mode and stays up.
+      verify: |
+        mode=$(kubectl get configmap shop-api-config -o jsonpath='{.data.mode}' 2>/dev/null)
+        test "$mode" = "active"
+      solution_script: |
+        kubectl patch configmap shop-api-config --type=merge -p '{"data":{"mode":"active"}}'
+        kubectl rollout restart deploy/api
+        kubectl rollout status deploy/api --timeout=120s
+      hints:
+        - "`kubectl logs -l app=api --tail=30`"
+        - "`kubectl get configmap shop-api-config -o yaml`"
+        - "`kubectl edit configmap shop-api-config` then `kubectl rollout restart deploy/api`"
+
+    - id: question-secret
+      type: question
+      title: Repair the API Secret
+      description: |
+        **Pager alert #4:** The API still will not serve traffic.
+
+        The health token comes from Secret **`shop-api-secret`** (key **`token`**). Logs mention a missing or invalid token.
+
+        Fix the Secret value and restart the API if needed. The correct token is **`SHOP{incident-recovered}`**.
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        Secret fixed — the API pod is Ready and serves `/health` with the correct token.
+      verify: |
+        token=$(kubectl get secret shop-api-secret -o jsonpath='{.data.token}' 2>/dev/null | base64 -d)
+        test "$token" = "SHOP{incident-recovered}"
+        ready=$(kubectl get deploy api -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "$ready" = "1"
+        body=$(kubectl exec deploy/api -- wget -qO- http://127.0.0.1/health 2>/dev/null)
+        test "$body" = "SHOP{incident-recovered}"
+      solution_script: |
+        kubectl patch secret shop-api-secret --type=merge \
+          -p '{"stringData":{"token":"SHOP{incident-recovered}"}}'
+        kubectl rollout restart deploy/api
+        kubectl rollout status deploy/api --timeout=120s
+      hints:
+        - "`kubectl logs -l app=api` — mentions Secret shop-api-secret"
+        - "`kubectl get secret shop-api-secret -o yaml` — data is base64-encoded"
+        - "`kubectl patch secret shop-api-secret --type=merge -p '{\"stringData\":{\"token\":\"SHOP{incident-recovered}\"}}'`"
+
+    - id: question-api-service
+      type: question
+      title: Restore API Service endpoints
+      description: |
+        **Pager alert #5:** In-cluster calls to the API still fail.
+
+        **`kubectl get svc,endpoints`** — **`api-svc`** may have **no endpoints** even though the API pod is Running.
+        Fix the Service so traffic reaches the API pods.
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        Service selector fixed — endpoints are populated again.
+      verify: |
+        sel=$(kubectl get svc api-svc -o jsonpath='{.spec.selector.app}' 2>/dev/null)
+        test "$sel" = "api"
+        ip=$(kubectl get endpoints api-svc -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null)
+        test -n "$ip"
+      solution_script: |
+        kubectl patch svc api-svc --type=json \
+          -p '[{"op":"replace","path":"/spec/selector","value":{"app":"api"}}]'
+      hints:
+        - "`kubectl get deploy api --show-labels` vs `kubectl get svc api-svc -o yaml`"
+        - "`kubectl get endpoints api-svc`"
+
+    - id: question-ingress-backend
+      type: question
+      title: Fix the shop Ingress
+      description: |
+        **Pager alert #6:** External health checks fail — **`http://<ingress-host>/shop/health`** returns errors.
+
+        The Ingress routes **`/shop/health`** to the API Service. Something in the Ingress spec still points at the wrong backend.
+      answer_type: observe
+      poll_interval_seconds: 5
+      setup:
+        - run: bash scripts/sabotage/break-ingress.sh
+      correct_message: |
+        Ingress repaired — the shop health URL should respond again.
+      verify: |
+        svc=$(kubectl get ingress shop-ingress -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.name}' 2>/dev/null)
+        test "$svc" = "api-svc"
+        host="${K3SLAB_INGRESS_HOST:-localhost}"
+        body=$(curl -sS --max-time 5 -f -H "Host: ${host}" http://127.0.0.1/shop/health)
+        test "$body" = "SHOP{incident-recovered}"
+      solution_script: |
+        kubectl patch ingress shop-ingress --type=json \
+          -p '[{"op":"replace","path":"/spec/rules/0/http/paths/0/backend/service/name","value":"api-svc"}]'
+      hints:
+        - "`kubectl get ingress shop-ingress -o yaml`"
+        - "Ingress backends must reference a **Service** name, not a Deployment name"
+        - "`curl -H \"Host: ${K3SLAB_INGRESS_HOST:-localhost}\" http://127.0.0.1/shop/health`"
+
+    - id: question-web-rollback
+      type: question
+      title: Roll back the broken web release
+      description: |
+        **Pager alert #7:** The storefront Deployment **`web`** was updated to a bad image and replicas are failing.
+
+        Use rollout history and roll back to the last healthy revision.
+      answer_type: observe
+      poll_interval_seconds: 5
+      setup:
+        - run: bash scripts/sabotage/break-web-rollout.sh
+      correct_message: |
+        Frontend rolled back — **`web`** is serving again with 2 ready replicas.
+      verify: |
+        img=$(kubectl get deploy web -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)
+        test "$img" = "nginx:1.27-alpine"
+        ready=$(kubectl get deploy web -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "$ready" = "2"
+      solution_script: |
+        kubectl rollout undo deploy/web
+        kubectl rollout status deploy/web --timeout=120s
+      hints:
+        - "`kubectl rollout history deploy/web`"
+        - "`kubectl rollout undo deploy/web`"
+
+    - id: question-fix-probes
+      type: question
+      title: Stop the API probe restart loop
+      description: |
+        **Pager alert #8:** **`api`** pods flap between Ready and CrashLoopBackOff — probe paths look wrong.
+
+        Fix readiness and liveness probes so they hit a valid HTTP path on the API (the health endpoint works).
+      answer_type: observe
+      poll_interval_seconds: 5
+      setup:
+        - run: bash scripts/sabotage/break-probes.sh
+      correct_message: |
+        Probes repaired — the API pod is stable and Ready.
+      verify: |
+        rpath=$(kubectl get deploy api -o jsonpath='{.spec.template.spec.containers[0].readinessProbe.httpGet.path}' 2>/dev/null)
+        lpath=$(kubectl get deploy api -o jsonpath='{.spec.template.spec.containers[0].livenessProbe.httpGet.path}' 2>/dev/null)
+        test "$rpath" = "/health"
+        test "$lpath" = "/health"
+        ready=$(kubectl get deploy api -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "$ready" = "1"
+      solution_script: |
+        kubectl patch deploy api --type=json \
+          -p '[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/health"},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/health"}]'
+        kubectl rollout status deploy/api --timeout=120s
+      hints:
+        - "`kubectl describe pod -l app=api` — probe failures in Events"
+        - "`kubectl get deploy api -o yaml` — check probe httpGet paths"
+
+    - id: question-scheduling-diagnosis
+      type: question
+      title: Diagnose Pending pods
+      description: |
+        **Pager drill:** A scale-up left new **`web`** pods stuck **Pending** with Events mentioning the node is **unschedulable**.
+
+        What is the most direct fix for a cordoned node?
+      answer_type: single_choice
+      options:
+        - kubectl uncordon <node-name>
+        - kubectl delete node <node-name>
+        - kubectl rollout undo deploy/web
+      correct_message: |
+        Correct — **`kubectl uncordon`** reverses **`kubectl cordon`** and allows scheduling again.
+      verify: |
+        test "$ANSWER" = "kubectl uncordon <node-name>"
+      solution_answer: "kubectl uncordon <node-name>"
+      hints:
+        - "Cordon marks a node unschedulable; uncordon reverses it"
+        - "`kubectl get nodes` — look for SchedulingDisabled"
+
+    - id: question-uncordon-node
+      type: question
+      title: Restore node scheduling
+      description: |
+        **Pager alert #9:** New pods cannot schedule — the cluster node was cordoned during maintenance and never uncordoned.
+
+        Uncordon the node so Pending **`web`** pods can run. This step completes when all **`web`** replicas are Ready.
+      answer_type: observe
+      poll_interval_seconds: 5
+      setup:
+        - run: bash scripts/sabotage/cordon-node.sh
+      correct_message: |
+        Node uncordoned — scheduling restored and the web Deployment is fully ready.
+      verify: |
+        node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        test -n "$node"
+        unsched=$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}' 2>/dev/null)
+        test "$unsched" != "true"
+        ready=$(kubectl get deploy web -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "$ready" = "3"
+      solution_script: |
+        node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+        kubectl uncordon "$node"
+        kubectl rollout status deploy/web --timeout=180s
+      hints:
+        - "`kubectl get nodes` — SchedulingDisabled means cordoned"
+        - "`kubectl describe pod` — Events mention unschedulable node"
+        - "`kubectl uncordon <node-name>`"
+
+    - id: question-metrics-server
+      type: question
+      title: Restore metrics-server
+      description: |
+        **Pager alert #10:** Monitoring is blind — **`kubectl top nodes`** fails.
+
+        Something in **`kube-system`** is wrong with **metrics-server**. Restore it so metrics work again.
+      answer_type: observe
+      poll_interval_seconds: 5
+      setup:
+        - run: bash scripts/sabotage/break-metrics-server.sh
+      correct_message: |
+        metrics-server is back — **`kubectl top nodes`** works again.
+      verify: |
+        ready=$(kubectl -n kube-system get deploy metrics-server -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "${ready:-0}" -ge 1
+        kubectl top nodes >/dev/null 2>&1
+      solution_script: |
+        kubectl -n kube-system scale deploy/metrics-server --replicas=1
+        kubectl -n kube-system rollout status deploy/metrics-server --timeout=180s
+        for _ in $(seq 1 60); do
+          if kubectl top nodes >/dev/null 2>&1; then
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
+      hints:
+        - "`kubectl get deploy -n kube-system`"
+        - "`kubectl get pods -n kube-system -l k8s-app=metrics-server`"
+        - "`kubectl -n kube-system scale deploy/metrics-server --replicas=1`"
+
+    - id: question-coredns
+      type: question
+      title: Restore cluster DNS
+      description: |
+        **Pager alert #11:** Internal DNS is failing — Services cannot be resolved by name inside the cluster.
+
+        **CoreDNS** in **`kube-system`** was scaled down during a bad change. Scale it back up and confirm DNS works.
+      answer_type: observe
+      poll_interval_seconds: 5
+      setup:
+        - run: bash scripts/sabotage/break-coredns.sh
+      correct_message: |
+        CoreDNS restored — cluster DNS resolves Service names again.
+      verify: |
+        ready=$(kubectl -n kube-system get deploy coredns -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "${ready:-0}" -ge 1
+        pod="dns-check-$$"
+        kubectl run "$pod" --restart=Never --image=busybox:1.36 --command -- nslookup api-svc.incident-lab.svc.cluster.local >/dev/null 2>&1
+        for _ in $(seq 1 30); do
+          phase=$(kubectl get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if test "$phase" = "Succeeded" || test "$phase" = "Failed"; then
+            break
+          fi
+          sleep 1
+        done
+        kubectl logs "$pod" 2>/dev/null | grep -q 'Address'
+        kubectl delete pod "$pod" --ignore-not-found >/dev/null
+      solution_script: |
+        kubectl -n kube-system scale deploy/coredns --replicas=1
+        kubectl -n kube-system rollout status deploy/coredns --timeout=180s
+        for _ in $(seq 1 60); do
+          pod="dns-check-$RANDOM"
+          if kubectl run "$pod" --restart=Never --image=busybox:1.36 --command -- nslookup kubernetes.default.svc.cluster.local >/dev/null 2>&1; then
+            for _ in $(seq 1 30); do
+              phase=$(kubectl get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+              if test "$phase" = "Succeeded" || test "$phase" = "Failed"; then
+                break
+              fi
+              sleep 1
+            done
+            if kubectl logs "$pod" 2>/dev/null | grep -q 'Address'; then
+              kubectl delete pod "$pod" --ignore-not-found >/dev/null
+              exit 0
+            fi
+          fi
+          kubectl delete pod "$pod" --ignore-not-found >/dev/null
+          sleep 2
+        done
+        exit 1
+      hints:
+        - "`kubectl get deploy -n kube-system` — look for coredns"
+        - "`kubectl -n kube-system scale deploy/coredns --replicas=1`"
+        - "Test DNS: `kubectl run -it --rm dns-test --image=busybox -- nslookup kubernetes.default`"
+
+    - id: question-shop-health
+      type: question
+      title: Confirm full recovery
+      description: |
+        **All-clear check:** ShopStream should be fully online.
+
+        Fetch the health token from **`http://<ingress-host>/shop/health`** (default **`http://localhost/shop/health`**) and paste it here.
+      answer_type: text
+      correct_message: |
+        Shop recovered — incident closed. Nice work on the full drill.
+      incorrect_message: |
+        That token does not match. Ensure ingress, API, and cluster DNS are all healthy, then curl the health URL again.
+      verify: |
+        host="${K3SLAB_INGRESS_HOST:-localhost}"
+        expected=$(curl -sS --max-time 5 -f -H "Host: ${host}" http://127.0.0.1/shop/health)
+        test "$expected" = "SHOP{incident-recovered}"
+        test "$ANSWER" = "$expected"
+      solution_answer_script: |
+        set -e
+        host="${K3SLAB_INGRESS_HOST:-localhost}"
+        for _ in $(seq 1 60); do
+          token=$(curl -sS --max-time 2 -f -H "Host: ${host}" http://127.0.0.1/shop/health 2>/dev/null) || true
+          if test "$token" = "SHOP{incident-recovered}"; then
+            printf '%s\n' "$token"
+            exit 0
+          fi
+          sleep 1
+        done
+        exit 1
+      hints:
+        - "`curl -H \"Host: ${K3SLAB_INGRESS_HOST:-localhost}\" http://127.0.0.1/shop/health`"
+        - "Paste the token only — not JSON or extra whitespace"
+
+  markdowns:
+    - id: mission-brief
+      title: Mission brief
+      icon: emergency
+      content: |
+        ## Incident Drills: Lab 4
+
+        You are on-call for **ShopStream**. A cascading outage hit the shop stack and cluster infra.
+
+        Work through pager alerts in order. Each fix uses skills from earlier labs plus **ConfigMaps** and **Secrets**.
+
+        - Namespace: **`incident-lab`**
+        - Health URL: **`http://localhost/shop/health`** (or your ingress host)
+        - Final token: served by the API from Secret **`shop-api-secret`**
+
+    - id: cheat-sheet
+      title: Cheat sheet
+      icon: description
+      content: |
+        ## App debugging
+
+        - Workloads: `kubectl get deploy,pods,svc,endpoints,ingress`
+        - Events: `kubectl describe pod -l app=api`
+        - Logs: `kubectl logs -l app=api`
+        - ConfigMap: `kubectl get configmap shop-api-config -o yaml`
+        - Secret: `kubectl get secret shop-api-secret -o yaml` (values are base64)
+        - Edit CM/Secret: `kubectl edit configmap ...` / `kubectl edit secret ...`
+        - Restart after CM/Secret change: `kubectl rollout restart deploy/api`
+
+        ## Rollouts and probes
+
+        - `kubectl rollout history deploy/web`
+        - `kubectl rollout undo deploy/web`
+        - Probe paths on `deploy/api`
+
+        ## Cluster infra
+
+        - Nodes: `kubectl get nodes` (SchedulingDisabled = cordoned)
+        - Uncordon: `kubectl uncordon <node>`
+        - metrics-server: `kubectl get deploy -n kube-system metrics-server`
+        - CoreDNS: `kubectl get deploy -n kube-system coredns`
+        - Metrics: `kubectl top nodes`
+        - DNS test: `kubectl run -it --rm dns-test --image=busybox -- nslookup kubernetes.default`
+
+    - id: cm-secret-note
+      title: ConfigMaps and Secrets
+      icon: key
+      content: |
+        ## How the API uses them
+
+        - **ConfigMap `shop-api-config`** — key **`mode`** must be **`active`**
+        - **Secret `shop-api-secret`** — key **`token`** becomes the `/health` response body
+
+        The API mounts both as files and validates them at startup. Fix the object, then restart the Deployment if pods do not pick up changes automatically.
+
+        Secret data in `kubectl get -o yaml` is **base64-encoded**. Use `stringData` when patching:
+
+        ```bash
+        kubectl patch secret shop-api-secret --type=merge \
+          -p '{"stringData":{"token":"SHOP{incident-recovered}"}}'
+        ```

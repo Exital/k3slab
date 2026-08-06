@@ -39,6 +39,7 @@ If a workshop or your own manifests create **NodePort** Services or **Ingress** 
 | **kubectl Basics** (`01-kubectl-basics`) | `-p 3010:3010` | Workshop UI only |
 | **Deployment Basics** (`02-deployment-basics`) | `-p 3010:3010` **and** `-p 80:80` | **`http://<ingress-host>/ctf/`** (default **`http://localhost/ctf/`**) for the [simple-ctf](https://github.com/Exital/simple-ctf) app |
 | **Workloads, Probes, and Autoscaling** (`03-workloads-probes-scaling`) | `-p 3010:3010` **and** `-p 80:80` | **`http://<ingress-host>/load-dashboard/`** + HPA challenge |
+| **Incident Drills** (`04-incident-drills`) | `-p 3010:3010` **and** `-p 80:80` | **`http://<ingress-host>/shop/health`** — on-call capstone (ConfigMaps, Secrets, cluster infra) |
 
 Example for the deployment lab:
 
@@ -188,7 +189,7 @@ Labs live under **`LABS_ROOT`** (default **`/lab`**). Each **immediate subdirect
 
 #### Lab order in the picker and menu
 
-The catalog is sorted **alphabetically by folder name** (the lab `id`). To control display order, prefix directory names with numbers. Shipped labs: **`01-kubectl-basics`**, **`02-deployment-basics`**, **`03-workloads-probes-scaling`**.
+The catalog is sorted **alphabetically by folder name** (the lab `id`). To control display order, prefix directory names with numbers. Shipped labs: **`01-kubectl-basics`**, **`02-deployment-basics`**, **`03-workloads-probes-scaling`**, **`04-incident-drills`**.
 
 Mount your own lab tree:
 
@@ -261,8 +262,9 @@ If reset fails, restart the container (`docker run …` again) for a clean slate
 | [lab/01-kubectl-basics](lab/01-kubectl-basics) | **kubectl Basics** — intro `kubectl` questions |
 | [lab/02-deployment-basics](lab/02-deployment-basics) | **Deployment Basics** — fix Deployment/Service/Ingress for [simple-ctf](https://github.com/Exital/simple-ctf) at `/ctf` |
 | [lab/03-workloads-probes-scaling](lab/03-workloads-probes-scaling) | **Workloads, Probes, and Autoscaling** — rollback control, probe behavior, and HPA basics |
+| [lab/04-incident-drills](lab/04-incident-drills) | **Incident Drills** — on-call capstone: ConfigMaps, Secrets, app wiring, rollouts, probes, node cordon, metrics-server, CoreDNS |
 | [app/frontend](app/frontend) | Vite + React + Tailwind + xterm.js |
-| [lab](lab) | Baked-in labs tree (`01-kubectl-basics/`, `02-deployment-basics/`, `03-workloads-probes-scaling/`, …) |
+| [lab](lab) | Baked-in labs tree (`01-kubectl-basics/`, `02-deployment-basics/`, `03-workloads-probes-scaling/`, `04-incident-drills/`, …) |
 
 ## Writing workshops (`workshop.yml`)
 
