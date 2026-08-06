@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: shop-api-config
-  namespace: incident-lab
-data:
-  mode: active

@@ -19,8 +19,5 @@ kubectl wait --for=condition=Available apiservice/v1beta1.metrics.k8s.io --timeo
 
 kubectl apply -f manifests/
 kubectl -n incident-lab rollout status deploy/web --timeout=120s
-kubectl -n incident-lab rollout status deploy/api --timeout=120s
-
-bash scripts/sabotage/initial-breaks.sh
 
 kubectl config set-context --current --namespace=incident-lab >/dev/null
