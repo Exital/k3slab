@@ -77,7 +77,8 @@ tabs:
       title: Restore metrics-server
       description: |
         **Pager alert #3:** Monitoring is blind — `kubectl top nodes` fails.
-        Restore metrics-server in `kube-system`.
+        A recent rollout changed metrics-server to a bad image tag.
+        Recover metrics-server in `kube-system` so metrics collection works again.
       answer_type: observe
       poll_interval_seconds: 5
       setup:
@@ -89,7 +90,7 @@ tabs:
         test "${ready:-0}" -ge 1
         kubectl top nodes >/dev/null 2>&1
       solution_script: |
-        kubectl -n kube-system scale deploy/metrics-server --replicas=1
+        kubectl rollout undo -n kube-system deploy/metrics-server
         kubectl -n kube-system rollout status deploy/metrics-server --timeout=180s
         for _ in $(seq 1 60); do
           if kubectl top nodes >/dev/null 2>&1; then
@@ -100,15 +101,18 @@ tabs:
         exit 1
       hints:
         - "`kubectl get deploy -n kube-system`"
+        - "`kubectl describe deploy metrics-server -n kube-system` (check image)"
+        - "`kubectl rollout history deploy/metrics-server -n kube-system`"
+        - "`kubectl rollout undo deploy/metrics-server -n kube-system`"
         - "`kubectl get pods -n kube-system -l k8s-app=metrics-server`"
-        - "`kubectl -n kube-system scale deploy/metrics-server --replicas=1`"
 
     - id: question-coredns
       type: question
       title: Restore cluster DNS
       description: |
         **Pager alert #4:** Internal DNS is failing.
-        CoreDNS in `kube-system` was scaled down. Bring it back and verify DNS resolution works.
+        A bad CoreDNS config edit was applied in `kube-system`.
+        Restore a valid Corefile and verify DNS resolution works.
       answer_type: observe
       poll_interval_seconds: 5
       setup:
@@ -130,7 +134,8 @@ tabs:
         kubectl logs "$pod" 2>/dev/null | grep -q 'Address'
         kubectl delete pod "$pod" --ignore-not-found >/dev/null
       solution_script: |
-        kubectl -n kube-system scale deploy/coredns --replicas=1
+        kubectl -n kube-system create configmap coredns --from-file=Corefile=/tmp/coredns-corefile.bak --dry-run=client -o yaml | kubectl apply -f -
+        kubectl -n kube-system rollout restart deploy/coredns
         kubectl -n kube-system rollout status deploy/coredns --timeout=180s
         for _ in $(seq 1 60); do
           pod="dns-check-$RANDOM"
@@ -153,7 +158,9 @@ tabs:
         exit 1
       hints:
         - "`kubectl get deploy -n kube-system` — look for coredns"
-        - "`kubectl -n kube-system scale deploy/coredns --replicas=1`"
+        - "`kubectl get configmap coredns -n kube-system -o yaml`"
+        - "`kubectl logs -n kube-system -l k8s-app=kube-dns --tail=50`"
+        - "After fixing Corefile, restart: `kubectl rollout restart deploy/coredns -n kube-system`"
         - "Test DNS: `kubectl run -it --rm dns-test --image=busybox -- nslookup kubernetes.default`"
 
     - id: question-infra-all-clear
@@ -186,8 +193,9 @@ tabs:
       solution_script: |
         node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
         kubectl uncordon "$node" >/dev/null 2>&1 || true
-        kubectl -n kube-system scale deploy/metrics-server --replicas=1 >/dev/null 2>&1 || true
-        kubectl -n kube-system scale deploy/coredns --replicas=1 >/dev/null 2>&1 || true
+        kubectl rollout undo -n kube-system deploy/metrics-server >/dev/null 2>&1 || true
+        kubectl -n kube-system create configmap coredns --from-file=Corefile=/tmp/coredns-corefile.bak --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
+        kubectl -n kube-system rollout restart deploy/coredns >/dev/null 2>&1 || true
       hints:
         - "Check `kubectl get nodes` and ensure no SchedulingDisabled"
         - "Check `kubectl top nodes`"
