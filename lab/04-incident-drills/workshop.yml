@@ -1,0 +1,228 @@
+name: Incident Drills
+description: "On-call infrastructure capstone: node scheduling, metrics-server, and CoreDNS recovery."
+
+tabs:
+  steps:
+    - id: prepare-lab
+      type: task
+      title: Prepare the incident environment
+      run: bash scripts/setup.sh
+
+    - id: question-ready-nodes
+      type: question
+      title: Check node readiness baseline
+      description: |
+        **Pager alert #1:** Start with a quick cluster baseline.
+        Submit the number of nodes that are in **Ready** state.
+      answer_type: text
+      correct_message: |
+        Correct — this lab runs a single-node K3s cluster.
+      verify: |
+        test "$ANSWER" = "1"
+      solution_answer: "1"
+      hints:
+        - "`kubectl get nodes`"
+        - "Count rows in Ready state"
+
+    - id: question-scheduling-diagnosis
+      type: question
+      title: Diagnose Pending pods
+      description: |
+        **Pager drill:** New **`web`** pods are stuck **Pending** and Events show the node is **unschedulable**.
+        What command directly reverses a cordon?
+      answer_type: single_choice
+      options:
+        - kubectl uncordon <node-name>
+        - kubectl delete node <node-name>
+        - kubectl rollout undo deploy/web
+      correct_message: |
+        Correct — `kubectl uncordon` marks the node schedulable again.
+      verify: |
+        test "$ANSWER" = "kubectl uncordon <node-name>"
+      solution_answer: "kubectl uncordon <node-name>"
+      hints:
+        - "Cordon -> unschedulable. Uncordon -> schedulable."
+        - "`kubectl get nodes`"
+
+    - id: question-uncordon-node
+      type: question
+      title: Restore node scheduling
+      description: |
+        **Pager alert #2:** Maintenance left the node cordoned.
+        Uncordon it so the scaled **`web`** Deployment can schedule all replicas.
+      answer_type: observe
+      poll_interval_seconds: 5
+      setup:
+        - run: bash scripts/sabotage/cordon-node.sh
+      correct_message: |
+        Scheduling restored — all `web` replicas are running.
+      verify: |
+        node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        test -n "$node"
+        unsched=$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}' 2>/dev/null)
+        test "$unsched" != "true"
+        ready=$(kubectl get deploy web -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "$ready" = "3"
+      solution_script: |
+        node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+        kubectl uncordon "$node"
+        kubectl rollout status deploy/web --timeout=180s
+      hints:
+        - "`kubectl get nodes` — SchedulingDisabled means cordoned"
+        - "`kubectl describe pod` — Events mention unschedulable node"
+        - "`kubectl uncordon <node-name>`"
+
+    - id: question-metrics-server
+      type: question
+      title: Restore metrics-server
+      description: |
+        **Pager alert #3:** Monitoring is blind — `kubectl top nodes` fails.
+        A recent rollout changed metrics-server to a bad image tag.
+        Recover metrics-server in `kube-system` so metrics collection works again.
+      answer_type: observe
+      poll_interval_seconds: 5
+      setup:
+        - run: bash scripts/sabotage/break-metrics-server.sh
+      correct_message: |
+        metrics-server is back — **`kubectl top nodes`** works again.
+      verify: |
+        ready=$(kubectl -n kube-system get deploy metrics-server -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "${ready:-0}" -ge 1
+        kubectl top nodes >/dev/null 2>&1
+      solution_script: |
+        kubectl rollout undo -n kube-system deploy/metrics-server
+        kubectl -n kube-system rollout status deploy/metrics-server --timeout=180s
+        for _ in $(seq 1 60); do
+          if kubectl top nodes >/dev/null 2>&1; then
+            exit 0
+          fi
+          sleep 2
+        done
+        exit 1
+      hints:
+        - "`kubectl get deploy -n kube-system`"
+        - "`kubectl describe deploy metrics-server -n kube-system` (check image)"
+        - "`kubectl rollout history deploy/metrics-server -n kube-system`"
+        - "`kubectl rollout undo deploy/metrics-server -n kube-system`"
+        - "`kubectl get pods -n kube-system -l k8s-app=metrics-server`"
+
+    - id: question-coredns
+      type: question
+      title: Restore cluster DNS
+      description: |
+        **Pager alert #4:** Internal DNS is failing.
+        A bad CoreDNS config edit was applied in `kube-system`.
+        Restore a valid Corefile and verify DNS resolution works.
+      answer_type: observe
+      poll_interval_seconds: 5
+      setup:
+        - run: bash scripts/sabotage/break-coredns.sh
+      correct_message: |
+        CoreDNS restored — cluster DNS resolves Service names again.
+      verify: |
+        ready=$(kubectl -n kube-system get deploy coredns -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "${ready:-0}" -ge 1
+        pod="dns-check-$$"
+        kubectl run "$pod" --restart=Never --image=busybox:1.36 --command -- nslookup kubernetes.default.svc.cluster.local >/dev/null 2>&1
+        for _ in $(seq 1 30); do
+          phase=$(kubectl get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if test "$phase" = "Succeeded" || test "$phase" = "Failed"; then
+            break
+          fi
+          sleep 1
+        done
+        kubectl logs "$pod" 2>/dev/null | grep -q 'Address'
+        kubectl delete pod "$pod" --ignore-not-found >/dev/null
+      solution_script: |
+        kubectl -n kube-system create configmap coredns --from-file=Corefile=/tmp/coredns-corefile.bak --dry-run=client -o yaml | kubectl apply -f -
+        kubectl -n kube-system rollout restart deploy/coredns
+        kubectl -n kube-system rollout status deploy/coredns --timeout=180s
+        for _ in $(seq 1 60); do
+          pod="dns-check-$RANDOM"
+          if kubectl run "$pod" --restart=Never --image=busybox:1.36 --command -- nslookup kubernetes.default.svc.cluster.local >/dev/null 2>&1; then
+            for _ in $(seq 1 30); do
+              phase=$(kubectl get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+              if test "$phase" = "Succeeded" || test "$phase" = "Failed"; then
+                break
+              fi
+              sleep 1
+            done
+            if kubectl logs "$pod" 2>/dev/null | grep -q 'Address'; then
+              kubectl delete pod "$pod" --ignore-not-found >/dev/null
+              exit 0
+            fi
+          fi
+          kubectl delete pod "$pod" --ignore-not-found >/dev/null
+          sleep 2
+        done
+        exit 1
+      hints:
+        - "`kubectl get deploy -n kube-system` — look for coredns"
+        - "`kubectl get configmap coredns -n kube-system -o yaml`"
+        - "`kubectl logs -n kube-system -l k8s-app=kube-dns --tail=50`"
+        - "After fixing Corefile, restart: `kubectl rollout restart deploy/coredns -n kube-system`"
+        - "Test DNS: `kubectl run -it --rm dns-test --image=busybox -- nslookup kubernetes.default`"
+
+    - id: question-infra-all-clear
+      type: question
+      title: Infra all-clear check
+      description: |
+        Final verification: confirm node scheduling, metrics, and DNS are healthy.
+        This step completes automatically when all three checks pass.
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        All core infrastructure checks are green. Incident closed.
+      verify: |
+        node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        test -n "$node"
+        unsched=$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}' 2>/dev/null || true)
+        test "$unsched" != "true"
+        kubectl top nodes >/dev/null 2>&1
+        pod="dns-final-$$"
+        kubectl run "$pod" --restart=Never --image=busybox:1.36 --command -- nslookup kubernetes.default.svc.cluster.local >/dev/null 2>&1
+        for _ in $(seq 1 30); do
+          phase=$(kubectl get pod "$pod" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+          if test "$phase" = "Succeeded" || test "$phase" = "Failed"; then
+            break
+          fi
+          sleep 1
+        done
+        kubectl logs "$pod" 2>/dev/null | grep -q 'Address'
+        kubectl delete pod "$pod" --ignore-not-found >/dev/null
+      solution_script: |
+        node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+        kubectl uncordon "$node" >/dev/null 2>&1 || true
+        kubectl rollout undo -n kube-system deploy/metrics-server >/dev/null 2>&1 || true
+        kubectl -n kube-system create configmap coredns --from-file=Corefile=/tmp/coredns-corefile.bak --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
+        kubectl -n kube-system rollout restart deploy/coredns >/dev/null 2>&1 || true
+      hints:
+        - "Check `kubectl get nodes` and ensure no SchedulingDisabled"
+        - "Check `kubectl top nodes`"
+        - "Run a DNS lookup from a test pod"
+
+  markdowns:
+    - id: mission-brief
+      title: Mission brief
+      icon: emergency
+      content: |
+        ## Incident Drills: Lab 4
+
+        You are on-call for cluster infrastructure incidents.
+        Work through pager alerts in order and restore core Kubernetes platform services.
+
+        - Namespace: **`incident-lab`**
+        - Focus: node scheduling, metrics, DNS
+
+    - id: cheat-sheet
+      title: Cheat sheet
+      icon: description
+      content: |
+        ## Cluster infra
+
+        - Nodes: `kubectl get nodes` (SchedulingDisabled = cordoned)
+        - Uncordon: `kubectl uncordon <node>`
+        - metrics-server: `kubectl get deploy -n kube-system metrics-server`
+        - CoreDNS: `kubectl get deploy -n kube-system coredns`
+        - Metrics: `kubectl top nodes`
+        - DNS test: `kubectl run -it --rm dns-test --image=busybox -- nslookup kubernetes.default`
