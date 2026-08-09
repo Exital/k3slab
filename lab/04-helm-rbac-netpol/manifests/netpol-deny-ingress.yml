@@ -1,9 +1,12 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: default-deny-ingress
+  name: deny-backend-ingress
   namespace: platform-lab
 spec:
-  podSelector: {}
+  # Lock down the backend only (keeps kubelet probes / other pods unaffected).
+  podSelector:
+    matchLabels:
+      app: backend
   policyTypes:
     - Ingress

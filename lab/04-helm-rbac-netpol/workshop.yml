@@ -26,15 +26,23 @@ tabs:
       correct_message: |
         Nice. The storefront release is installed and both Deployments are serving.
       verify: |
-        helm status storefront -n platform-lab >/dev/null 2>&1
+        helm list -n platform-lab -q 2>/dev/null | grep -qx storefront
+        kubectl get deploy frontend -n platform-lab >/dev/null
+        kubectl get deploy backend -n platform-lab >/dev/null
         ready_f=$(kubectl get deploy frontend -n platform-lab -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
         ready_b=$(kubectl get deploy backend -n platform-lab -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
-        test "${ready_f:-0}" = "1"
-        test "${ready_b:-0}" = "1"
+        test "${ready_f:-0}" -ge 1
+        test "${ready_b:-0}" -ge 1
       solution_script: |
+        set -euo pipefail
         helm upgrade --install storefront ./charts/storefront -n platform-lab
-        kubectl -n platform-lab rollout status deploy/frontend --timeout=120s
-        kubectl -n platform-lab rollout status deploy/backend --timeout=120s
+        if ! kubectl -n platform-lab wait --for=condition=Available deploy/frontend deploy/backend --timeout=300s; then
+          echo "storefront deployments did not become Available; diagnostics:" >&2
+          kubectl -n platform-lab get deploy,pods,events -o wide >&2 || true
+          kubectl -n platform-lab describe pod -l 'app in (frontend,backend)' >&2 || true
+          exit 1
+        fi
+        kubectl -n platform-lab wait --for=condition=Ready pod -l 'app in (frontend,backend)' --timeout=120s
       hints:
         - "`helm install <release> <chart> -n platform-lab`"
         - "Chart path from this lab directory: `./charts/storefront`"
@@ -59,8 +67,10 @@ tabs:
         test "${replicas:-0}" = "2"
         test "${ready:-0}" = "2"
       solution_script: |
+        set -euo pipefail
         helm upgrade storefront ./charts/storefront -n platform-lab --set backend.replicas=2
-        kubectl -n platform-lab rollout status deploy/backend --timeout=120s
+        kubectl -n platform-lab wait --for=condition=Available deploy/backend --timeout=300s
+        test "$(kubectl get deploy backend -n platform-lab -o jsonpath='{.status.readyReplicas}')" -ge 2
       hints:
         - "`helm upgrade storefront ./charts/storefront -n platform-lab --set backend.replicas=2`"
         - "`helm get values storefront -n platform-lab`"
@@ -147,7 +157,7 @@ tabs:
       description: |
         **Platform ticket #4:** lock down east-west traffic.
 
-        A **default-deny ingress** NetworkPolicy is now in place for the namespace, so nothing can reach the backend yet.
+        A deny-ingress NetworkPolicy is now selecting the **backend** pods, so nothing can reach them yet.
         Backend should accept ingress **only from pods labeled `app=frontend`**.
 
         Apply a NetworkPolicy named **`allow-frontend-to-backend`** that selects `app=backend` and allows ingress from `app=frontend`.
@@ -160,13 +170,24 @@ tabs:
       poll_interval_seconds: 5
       setup:
         - run: |
+            set -euo pipefail
             kubectl apply -f manifests/netpol-deny-ingress.yml
+            # Replace any older namespace-wide deny from previous lab revisions.
+            kubectl -n platform-lab delete netpol default-deny-ingress --ignore-not-found
             kubectl apply -f manifests/attacker-pod.yml
-            kubectl -n platform-lab wait --for=condition=Ready pod/attacker --timeout=120s
-            kubectl -n platform-lab rollout status deploy/frontend --timeout=120s
-            kubectl -n platform-lab rollout status deploy/backend --timeout=120s
+            kubectl -n platform-lab wait --for=condition=Ready pod/attacker --timeout=180s
+            kubectl -n platform-lab rollout status deploy/frontend --timeout=180s
+            kubectl -n platform-lab rollout status deploy/backend --timeout=180s
+            # Confirm backend serves locally (not via Service) before testing policies.
+            for _ in $(seq 1 30); do
+              if kubectl -n platform-lab exec deploy/backend -- wget -q -O- -T 2 http://127.0.0.1/ >/dev/null 2>&1; then
+                break
+              fi
+              sleep 2
+            done
+            kubectl -n platform-lab exec deploy/backend -- wget -q -O- -T 3 http://127.0.0.1/ >/dev/null
             # Give the policy controller a moment to program deny rules.
-            sleep 3
+            sleep 5
       correct_message: |
         Contained. Frontend can reach backend; the attacker pod cannot. Remember that label allowlists need RBAC (and often namespace boundaries) behind them.
       verify: |
@@ -176,24 +197,32 @@ tabs:
         from=$(kubectl get netpol allow-frontend-to-backend -n platform-lab -o jsonpath='{.spec.ingress[0].from[0].podSelector.matchLabels.app}' 2>/dev/null)
         test "$from" = "frontend"
 
-        kubectl -n platform-lab exec deploy/frontend -- wget -q -O- -T 3 http://backend/ >/dev/null
+        kubectl -n platform-lab exec deploy/frontend -- wget -q -O- -T 5 http://backend.platform-lab.svc.cluster.local/ >/dev/null
 
-        if kubectl -n platform-lab exec pod/attacker -- wget -q -O- -T 3 http://backend/ >/dev/null 2>&1; then
+        if kubectl -n platform-lab exec pod/attacker -- wget -q -O- -T 5 http://backend.platform-lab.svc.cluster.local/ >/dev/null 2>&1; then
           echo "attacker unexpectedly reached backend" >&2
           exit 1
         fi
       solution_script: |
+        set -euo pipefail
         kubectl apply -f manifests/allow-frontend-to-backend.yml
-        # Wait briefly for kube-router netpol rules, then confirm path works.
-        for _ in $(seq 1 30); do
-          if kubectl -n platform-lab exec deploy/frontend -- wget -q -O- -T 3 http://backend/ >/dev/null 2>&1; then
+        # Wait for kube-router to program allow rules (can lag after long CI runs).
+        ok=0
+        for _ in $(seq 1 60); do
+          if kubectl -n platform-lab exec deploy/frontend -- wget -q -O- -T 5 http://backend.platform-lab.svc.cluster.local/ >/dev/null 2>&1; then
+            ok=1
             break
           fi
-          sleep 2
+          sleep 3
         done
-        kubectl -n platform-lab exec deploy/frontend -- wget -q -O- -T 3 http://backend/ >/dev/null
+        if [[ "$ok" != "1" ]]; then
+          echo "frontend still cannot reach backend after allow policy; diagnostics:" >&2
+          kubectl -n platform-lab get netpol,deploy,pods,endpoints -o wide >&2 || true
+          kubectl -n platform-lab exec deploy/backend -- wget -q -O- -T 3 http://127.0.0.1/ >/dev/null 2>&1 || echo "backend localhost wget failed" >&2
+          exit 1
+        fi
       hints:
-        - "`kubectl get netpol -n platform-lab` — default-deny means you must explicitly allow paths"
+        - "`kubectl get netpol -n platform-lab` — backend deny means you must explicitly allow paths"
         - "Create a NetworkPolicy selecting `app=backend` with ingress from `app=frontend`"
         - "A sample policy is in `manifests/allow-frontend-to-backend.yml`"
         - "Test: `kubectl exec deploy/frontend -- wget -q -O- -T 3 http://backend/` vs the same from `pod/attacker`"
@@ -239,12 +268,13 @@ tabs:
       content: |
         ## How NetworkPolicies work here
 
-        K3s enforces NetworkPolicies with an embedded controller (kube-router), even with default Flannel.
+        This lab enables K3s NetworkPolicy enforcement (`cluster.enable_network_policy: true`).
 
-        An empty `ingress: []` (or a policy with no allow rules) on selected pods is **deny-all ingress** for those pods.
+        A NetworkPolicy with no `ingress` allow rules on selected pods is **deny-all ingress** for those pods.
         Policies are additive allowlists once any policy selects a pod.
 
         This lab uses **ingress-only** policies so DNS and egress keep working for simple `wget` checks.
+        The deny policy targets **backend** pods only, so frontend/attacker stay reachable for troubleshooting.
 
         **Labels are not identity.** If someone can create pods in the namespace, they can set `app=frontend` and bypass a label-based allowlist.
         Real clusters pair NetworkPolicies with RBAC, admission controls, and often separate namespaces.
