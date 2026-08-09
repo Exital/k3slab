@@ -1,0 +1,7 @@
+frontend:
+  image: nginx:1.27-alpine
+  replicas: 1
+
+backend:
+  image: nginx:1.27-alpine
+  replicas: 1

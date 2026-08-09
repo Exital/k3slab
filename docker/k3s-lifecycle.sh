@@ -11,6 +11,7 @@
 
 k3slab_load_cluster_profile() {
   K3SLAB_DISABLE_TRAEFIK=false
+  K3SLAB_ENABLE_NETWORK_POLICY=false
   if [[ -f "${K3SLAB_CLUSTER_PROFILE}" ]]; then
     # shellcheck source=/dev/null
     source "${K3SLAB_CLUSTER_PROFILE}"
@@ -34,10 +35,13 @@ k3slab_k3s_server_args() {
     --write-kubeconfig-mode 644 \
     --bind-address 0.0.0.0 \
     --https-listen-port 6443 \
-    --disable-network-policy \
     --disable=metrics-server \
     --snapshotter="${K3SLAB_K3S_SNAPSHOTTER}"
   )
+  # Default: disable NetworkPolicy controller (lighter). Labs that teach netpol opt in.
+  if ! k3slab_true "${K3SLAB_ENABLE_NETWORK_POLICY}"; then
+    args+=(--disable-network-policy)
+  fi
   if k3slab_true "${K3SLAB_DISABLE_TRAEFIK}"; then
     args+=(--disable=traefik)
   fi

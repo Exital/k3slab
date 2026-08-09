@@ -19,39 +19,53 @@ func clusterProfilePath() string {
 // ClusterDisableTraefik reads whether the lab's workshop.yml disables bundled Traefik.
 // Missing cluster config defaults to false (Traefik enabled).
 func ClusterDisableTraefik(labsRoot, id string) (bool, error) {
+	cfg, err := readClusterConfig(labsRoot, id)
+	if err != nil {
+		return false, err
+	}
+	return cfg.DisableTraefik, nil
+}
+
+// ClusterEnableNetworkPolicy reads whether the lab enables K3s NetworkPolicy enforcement.
+// Missing cluster config defaults to false (network policy disabled via --disable-network-policy).
+func ClusterEnableNetworkPolicy(labsRoot, id string) (bool, error) {
+	cfg, err := readClusterConfig(labsRoot, id)
+	if err != nil {
+		return false, err
+	}
+	return cfg.EnableNetworkPolicy, nil
+}
+
+func readClusterConfig(labsRoot, id string) (workshop.ClusterConfig, error) {
 	if id == "" {
-		return false, nil
+		return workshop.ClusterConfig{}, nil
 	}
 	labDir, err := LabPath(labsRoot, id)
 	if err != nil {
-		return false, err
+		return workshop.ClusterConfig{}, err
 	}
 	data, err := os.ReadFile(filepath.Join(labDir, workshopFile))
 	if err != nil {
-		return false, fmt.Errorf("read %s: %w", workshopFile, err)
+		return workshop.ClusterConfig{}, fmt.Errorf("read %s: %w", workshopFile, err)
 	}
 	w, err := workshop.Parse(data)
 	if err != nil {
-		return false, err
+		return workshop.ClusterConfig{}, err
 	}
-	return w.Cluster.DisableTraefik, nil
+	return w.Cluster, nil
 }
 
 // WriteClusterProfile writes /run/k3slab/cluster-profile.env for k3s-lifecycle scripts.
 func WriteClusterProfile(labsRoot, id string) error {
-	disable, err := ClusterDisableTraefik(labsRoot, id)
+	cfg, err := readClusterConfig(labsRoot, id)
 	if err != nil {
 		return err
-	}
-	val := "false"
-	if disable {
-		val = "true"
 	}
 	path := clusterProfilePath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	content := fmt.Sprintf("K3SLAB_DISABLE_TRAEFIK=%s\n", val)
+	content := FormatClusterProfile(cfg.DisableTraefik, cfg.EnableNetworkPolicy) + "\n"
 	return os.WriteFile(path, []byte(content), 0o644)
 }
 
@@ -60,11 +74,23 @@ func ClusterProfilePath() string {
 	return clusterProfilePath()
 }
 
-// FormatClusterProfileLine returns the shell assignment for tests.
-func FormatClusterProfileLine(disableTraefik bool) string {
-	val := "false"
+// FormatClusterProfile returns the shell assignments for the cluster profile env file.
+func FormatClusterProfile(disableTraefik, enableNetworkPolicy bool) string {
+	traefik := "false"
 	if disableTraefik {
-		val = "true"
+		traefik = "true"
 	}
-	return strings.TrimSpace("K3SLAB_DISABLE_TRAEFIK=" + val)
+	netpol := "false"
+	if enableNetworkPolicy {
+		netpol = "true"
+	}
+	return strings.TrimSpace(fmt.Sprintf(
+		"K3SLAB_DISABLE_TRAEFIK=%s\nK3SLAB_ENABLE_NETWORK_POLICY=%s",
+		traefik, netpol,
+	))
+}
+
+// FormatClusterProfileLine returns the Traefik assignment (kept for older tests/callers).
+func FormatClusterProfileLine(disableTraefik bool) string {
+	return FormatClusterProfile(disableTraefik, false)
 }

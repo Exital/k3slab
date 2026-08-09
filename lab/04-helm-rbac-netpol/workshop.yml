@@ -1,0 +1,250 @@
+name: Helm, RBAC, and Network Policies
+description: "Platform hardening: ship a Helm chart, fix least-privilege RBAC, and contain lateral traffic with NetworkPolicies."
+
+cluster:
+  enable_network_policy: true
+
+tabs:
+  steps:
+    - id: prepare-lab
+      type: task
+      title: Prepare the platform lab
+      run: bash scripts/setup.sh
+
+    - id: question-helm-install
+      type: question
+      title: Install the storefront with Helm
+      description: |
+        **Platform ticket #1:** ops wants the next service packaged, not hand-applied YAML.
+
+        A local chart lives at **`./charts/storefront`** (your terminal starts in this lab directory).
+        Install a Helm release named **`storefront`** into namespace **`platform-lab`**.
+
+        This step completes automatically when the **frontend** and **backend** Deployments are ready.
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        Nice. The storefront release is installed and both Deployments are serving.
+      verify: |
+        helm status storefront -n platform-lab >/dev/null 2>&1
+        ready_f=$(kubectl get deploy frontend -n platform-lab -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        ready_b=$(kubectl get deploy backend -n platform-lab -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "${ready_f:-0}" = "1"
+        test "${ready_b:-0}" = "1"
+      solution_script: |
+        helm upgrade --install storefront ./charts/storefront -n platform-lab
+        kubectl -n platform-lab rollout status deploy/frontend --timeout=120s
+        kubectl -n platform-lab rollout status deploy/backend --timeout=120s
+      hints:
+        - "`helm install <release> <chart> -n platform-lab`"
+        - "Chart path from this lab directory: `./charts/storefront`"
+        - "`helm list -n platform-lab` and `kubectl get deploy`"
+
+    - id: question-helm-upgrade
+      type: question
+      title: Scale the backend with a Helm upgrade
+      description: |
+        **Platform ticket #2:** traffic is climbing.
+
+        Upgrade release **`storefront`** so chart value **`backend.replicas`** is **2**, without deleting the release.
+
+        This step completes automatically when the backend Deployment has 2 ready replicas.
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        Good — Helm upgraded the release and the backend scaled out via values.
+      verify: |
+        replicas=$(kubectl get deploy backend -n platform-lab -o jsonpath='{.spec.replicas}' 2>/dev/null)
+        ready=$(kubectl get deploy backend -n platform-lab -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "${replicas:-0}" = "2"
+        test "${ready:-0}" = "2"
+      solution_script: |
+        helm upgrade storefront ./charts/storefront -n platform-lab --set backend.replicas=2
+        kubectl -n platform-lab rollout status deploy/backend --timeout=120s
+      hints:
+        - "`helm upgrade storefront ./charts/storefront -n platform-lab --set backend.replicas=2`"
+        - "`helm get values storefront -n platform-lab`"
+        - "`kubectl get deploy backend`"
+
+    - id: question-helm-release
+      type: question
+      title: Helm release basics
+      description: |
+        Which statement is correct?
+      answer_type: single_choice
+      options:
+        - A Helm release is a named install of a chart; helm upgrade updates that release in place.
+        - helm install only renders YAML locally; nothing is applied to the cluster.
+        - Helm charts can only be installed from remote HTTPS repos, never from a local directory.
+      verify: |
+        test "$ANSWER" = "A Helm release is a named install of a chart; helm upgrade updates that release in place."
+      solution_answer: "A Helm release is a named install of a chart; helm upgrade updates that release in place."
+      correct_message: |
+        Exactly. Releases are named installs; upgrade revises the same release instead of starting over.
+      hints:
+        - "Think about what `helm list` shows after install and upgrade"
+
+    - id: question-fix-rbac
+      type: question
+      title: Unblock the catalog bot
+      description: |
+        **Platform ticket #3:** the catalog bot cannot list pods.
+
+        Job **`catalog-list`** runs as ServiceAccount **`catalog-bot`** and must **list pods** in **`platform-lab`**.
+        Role **`catalog-reader`** already has the right rules, but the RoleBinding is wrong.
+
+        Fix the RoleBinding so **`catalog-bot`** is authorized. Check with:
+        `kubectl auth can-i list pods --as=system:serviceaccount:platform-lab:catalog-bot`
+
+        This step completes automatically when the bot can list pods.
+      answer_type: observe
+      poll_interval_seconds: 5
+      setup:
+        - run: |
+            kubectl apply -f manifests/catalog-bot-rbac.yml
+            kubectl delete job catalog-list -n platform-lab --ignore-not-found
+            kubectl apply -f manifests/catalog-bot-job.yml
+      correct_message: |
+        RBAC is fixed. The catalog bot has least-privilege access to list pods in this namespace.
+      verify: |
+        subj=$(kubectl get rolebinding catalog-reader -n platform-lab -o jsonpath='{.subjects[0].name}' 2>/dev/null)
+        test "$subj" = "catalog-bot"
+        kubectl auth can-i list pods --as=system:serviceaccount:platform-lab:catalog-bot -n platform-lab | grep -qx yes
+      solution_script: |
+        kubectl delete rolebinding catalog-reader -n platform-lab --ignore-not-found
+        kubectl create rolebinding catalog-reader \
+          --role=catalog-reader \
+          --serviceaccount=platform-lab:catalog-bot \
+          -n platform-lab
+        kubectl delete job catalog-list -n platform-lab --ignore-not-found
+        kubectl apply -f manifests/catalog-bot-job.yml
+      hints:
+        - "`kubectl get sa,role,rolebinding -n platform-lab`"
+        - "`kubectl get rolebinding catalog-reader -o yaml` — check the subject ServiceAccount name"
+        - "Bind SA `catalog-bot` to Role `catalog-reader` (delete/recreate the RoleBinding or patch the subject)"
+
+    - id: question-role-vs-clusterrole
+      type: question
+      title: Namespaced vs cluster-scoped RBAC
+      description: |
+        Which statement is correct?
+      answer_type: single_choice
+      options:
+        - A Role + RoleBinding grant permissions in one namespace; a ClusterRole can grant cluster-wide (or be bound into a namespace via RoleBinding).
+        - Roles always apply to every namespace; ClusterRoles are deprecated.
+        - ServiceAccounts cannot be subjects of RoleBindings.
+      verify: |
+        test "$ANSWER" = "A Role + RoleBinding grant permissions in one namespace; a ClusterRole can grant cluster-wide (or be bound into a namespace via RoleBinding)."
+      solution_answer: "A Role + RoleBinding grant permissions in one namespace; a ClusterRole can grant cluster-wide (or be bound into a namespace via RoleBinding)."
+      correct_message: |
+        Right. Prefer namespaced Roles for least privilege; reach for ClusterRole only when you truly need cluster scope.
+      hints:
+        - "Role is namespaced; ClusterRole is cluster-scoped"
+
+    - id: question-netpol-allow
+      type: question
+      title: Stop lateral traffic to the backend
+      description: |
+        **Platform ticket #4:** lock down east-west traffic.
+
+        A **default-deny ingress** NetworkPolicy is now in place for the namespace, so nothing can reach the backend yet.
+        Backend should accept ingress **only from pods labeled `app=frontend`**.
+
+        Apply a NetworkPolicy named **`allow-frontend-to-backend`** that selects `app=backend` and allows ingress from `app=frontend`.
+        Confirm from a frontend pod that **`backend`** is reachable, and from pod **`attacker`** that it is not.
+
+        This step completes automatically when the allow policy is correct and connectivity matches.
+
+        Note: labels are not a trust boundary — anyone who can create pods in this namespace could spoof `app=frontend`. Pair NetworkPolicies with RBAC (and often separate namespaces) in real clusters.
+      answer_type: observe
+      poll_interval_seconds: 5
+      setup:
+        - run: |
+            kubectl apply -f manifests/netpol-deny-ingress.yml
+            kubectl apply -f manifests/attacker-pod.yml
+            kubectl -n platform-lab wait --for=condition=Ready pod/attacker --timeout=120s
+            kubectl -n platform-lab rollout status deploy/frontend --timeout=120s
+            kubectl -n platform-lab rollout status deploy/backend --timeout=120s
+            # Give the policy controller a moment to program deny rules.
+            sleep 3
+      correct_message: |
+        Contained. Frontend can reach backend; the attacker pod cannot. Remember that label allowlists need RBAC (and often namespace boundaries) behind them.
+      verify: |
+        kubectl get netpol allow-frontend-to-backend -n platform-lab >/dev/null 2>&1
+        sel=$(kubectl get netpol allow-frontend-to-backend -n platform-lab -o jsonpath='{.spec.podSelector.matchLabels.app}' 2>/dev/null)
+        test "$sel" = "backend"
+        from=$(kubectl get netpol allow-frontend-to-backend -n platform-lab -o jsonpath='{.spec.ingress[0].from[0].podSelector.matchLabels.app}' 2>/dev/null)
+        test "$from" = "frontend"
+
+        kubectl -n platform-lab exec deploy/frontend -- wget -q -O- -T 3 http://backend/ >/dev/null
+
+        if kubectl -n platform-lab exec pod/attacker -- wget -q -O- -T 3 http://backend/ >/dev/null 2>&1; then
+          echo "attacker unexpectedly reached backend" >&2
+          exit 1
+        fi
+      solution_script: |
+        kubectl apply -f manifests/allow-frontend-to-backend.yml
+        # Wait briefly for kube-router netpol rules, then confirm path works.
+        for _ in $(seq 1 30); do
+          if kubectl -n platform-lab exec deploy/frontend -- wget -q -O- -T 3 http://backend/ >/dev/null 2>&1; then
+            break
+          fi
+          sleep 2
+        done
+        kubectl -n platform-lab exec deploy/frontend -- wget -q -O- -T 3 http://backend/ >/dev/null
+      hints:
+        - "`kubectl get netpol -n platform-lab` — default-deny means you must explicitly allow paths"
+        - "Create a NetworkPolicy selecting `app=backend` with ingress from `app=frontend`"
+        - "A sample policy is in `manifests/allow-frontend-to-backend.yml`"
+        - "Test: `kubectl exec deploy/frontend -- wget -q -O- -T 3 http://backend/` vs the same from `pod/attacker`"
+
+  markdowns:
+    - id: mission-brief
+      title: Mission brief
+      icon: emergency
+      content: |
+        ## Platform Hardening: Lab 4
+
+        After the launch chaos, lock the platform down the right way.
+
+        1. Ship the storefront with **Helm** (install + values upgrade).
+        2. Fix **least-privilege RBAC** for the catalog bot.
+        3. Contain lateral traffic with **NetworkPolicies**.
+
+        Namespace: **`platform-lab`** (set as default after setup).
+
+    - id: cheat-sheet
+      title: Cheat sheet
+      icon: description
+      content: |
+        ## Useful commands
+
+        - Helm:
+          - `helm install storefront ./charts/storefront -n platform-lab`
+          - `helm upgrade storefront ./charts/storefront -n platform-lab --set backend.replicas=2`
+          - `helm list -n platform-lab`
+          - `helm get values storefront -n platform-lab`
+        - RBAC:
+          - `kubectl get sa,role,rolebinding`
+          - `kubectl auth can-i list pods --as=system:serviceaccount:platform-lab:catalog-bot`
+          - `kubectl create rolebinding catalog-reader --role=catalog-reader --serviceaccount=platform-lab:catalog-bot`
+        - NetworkPolicy:
+          - `kubectl get netpol`
+          - `kubectl exec deploy/frontend -- wget -q -O- -T 3 http://backend/`
+          - `kubectl exec pod/attacker -- wget -q -O- -T 3 http://backend/`
+
+    - id: netpol-note
+      title: NetPol note
+      icon: info
+      content: |
+        ## How NetworkPolicies work here
+
+        K3s enforces NetworkPolicies with an embedded controller (kube-router), even with default Flannel.
+
+        An empty `ingress: []` (or a policy with no allow rules) on selected pods is **deny-all ingress** for those pods.
+        Policies are additive allowlists once any policy selects a pod.
+
+        This lab uses **ingress-only** policies so DNS and egress keep working for simple `wget` checks.
+
+        **Labels are not identity.** If someone can create pods in the namespace, they can set `app=frontend` and bypass a label-based allowlist.
+        Real clusters pair NetworkPolicies with RBAC, admission controls, and often separate namespaces.

@@ -214,6 +214,31 @@ tabs:
 	if w.Cluster.DisableTraefik {
 		t.Fatal("expected disable_traefik false by default")
 	}
+	if w.Cluster.EnableNetworkPolicy {
+		t.Fatal("expected enable_network_policy false by default")
+	}
+}
+
+func TestParseClusterEnableNetworkPolicy(t *testing.T) {
+	yaml := `
+name: Test
+cluster:
+  enable_network_policy: true
+tabs:
+  steps:
+    - id: q1
+      type: question
+      title: Q
+      answer_type: text
+      verify: 'true'
+`
+	w, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !w.Cluster.EnableNetworkPolicy {
+		t.Fatal("expected enable_network_policy true")
+	}
 }
 
 func TestParseSetupBackgroundInvalidType(t *testing.T) {

@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: catalog-list
+  namespace: platform-lab
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: catalog-list
+    spec:
+      serviceAccountName: catalog-bot
+      restartPolicy: OnFailure
+      containers:
+        - name: list-pods
+          image: bitnami/kubectl:1.31
+          command:
+            - /bin/sh
+            - -c
+            - kubectl get pods -n platform-lab

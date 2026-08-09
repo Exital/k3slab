@@ -73,6 +73,9 @@ type ClusterConfig struct {
 	// DisableTraefik when true starts K3s with --disable=traefik (Traefik off).
 	// When false or unset, K3s keeps the bundled Traefik ingress controller enabled.
 	DisableTraefik bool `json:"disable_traefik,omitempty"`
+	// EnableNetworkPolicy when true omits K3s --disable-network-policy so NetworkPolicies enforce.
+	// When false or unset, K3s starts with network policy disabled (k3slab default for lighter labs).
+	EnableNetworkPolicy bool `json:"enable_network_policy,omitempty"`
 }
 
 // Workshop is the parsed workshop.yml root.

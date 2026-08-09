@@ -17,7 +17,8 @@ type rawWorkshop struct {
 }
 
 type rawCluster struct {
-	DisableTraefik *bool `yaml:"disable_traefik"`
+	DisableTraefik      *bool `yaml:"disable_traefik"`
+	EnableNetworkPolicy *bool `yaml:"enable_network_policy"`
 }
 
 type rawTabs struct {
@@ -101,10 +102,17 @@ func Parse(data []byte) (*Workshop, error) {
 }
 
 func normalizeCluster(rc *rawCluster) ClusterConfig {
-	if rc == nil || rc.DisableTraefik == nil {
+	if rc == nil {
 		return ClusterConfig{}
 	}
-	return ClusterConfig{DisableTraefik: *rc.DisableTraefik}
+	var cfg ClusterConfig
+	if rc.DisableTraefik != nil {
+		cfg.DisableTraefik = *rc.DisableTraefik
+	}
+	if rc.EnableNetworkPolicy != nil {
+		cfg.EnableNetworkPolicy = *rc.EnableNetworkPolicy
+	}
+	return cfg
 }
 
 func normalizeMarkdown(rm rawMarkdown, idx int) (SidebarTab, error) {
