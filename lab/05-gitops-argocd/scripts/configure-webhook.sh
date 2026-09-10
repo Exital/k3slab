@@ -10,8 +10,8 @@ GITEA_USER="${GITEA_USER:-gitops}"
 GITEA_PASS="${GITEA_PASS:-gitops123}"
 REPO_NAME="${REPO_NAME:-demo-app}"
 WEBHOOK_SECRET="${WEBHOOK_SECRET:-k3slab-gitops-webhook}"
-# Reachable from the Gitea pod via cluster DNS. Include Argo rootpath prefix.
-ARGOCD_WEBHOOK_URL="${ARGOCD_WEBHOOK_URL:-http://argocd-server.argocd.svc.cluster.local/argocd/api/webhook}"
+# Proxy rewrites ROOT_URL (localhost/gitea) → ClusterIP URL Argo watches, then forwards.
+ARGOCD_WEBHOOK_URL="${ARGOCD_WEBHOOK_URL:-http://gitops-webhook-proxy.gitops-lab.svc.cluster.local:8080/}"
 
 bash scripts/map-cluster-dns.sh
 

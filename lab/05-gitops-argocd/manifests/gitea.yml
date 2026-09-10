@@ -61,6 +61,9 @@ spec:
               value: "true"
             - name: GITEA__service__REQUIRE_SIGNIN_VIEW
               value: "false"
+            # Default ALLOWED_HOST_LIST=external blocks ClusterIP webhooks (proxy → Argo).
+            - name: GITEA__webhook__ALLOWED_HOST_LIST
+              value: "gitops-webhook-proxy.gitops-lab.svc.cluster.local,argocd-server.argocd.svc.cluster.local,private,loopback"
           readinessProbe:
             httpGet:
               path: /

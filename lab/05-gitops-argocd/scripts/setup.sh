@@ -35,6 +35,7 @@ k3s ctr images pull "${GITEA_IMAGE}"
 k3s ctr images pull "${NGINX_IMAGE}"
 k3s ctr images pull "${REDIS_IMAGE}"
 k3s ctr images pull "quay.io/argoproj/argocd:${ARGOCD_APP_VERSION}"
+k3s ctr images pull "docker.io/library/python:3.12-alpine"
 
 echo "[gitops-lab] Installing Gitea..."
 # Patch ROOT_URL / DOMAIN for the active ingress host before apply.
@@ -47,14 +48,20 @@ sed \
 kubectl apply -f "${tmp_gitea}"
 rm -f "${tmp_gitea}"
 
-# Prefer rendered ingress (platform templates); fall back to committed file.
+# Prefer rendered ingress (platform templates); always inject active ingress host.
 kubectl apply -f manifests/gitea-stripprefix.yml
-if [[ -f manifests/gitea-ingress.yml ]]; then
-  kubectl apply -f manifests/gitea-ingress.yml
-else
+tmp_gitea_ing="$(mktemp)"
+if [[ -f manifests/gitea-ingress.yml.template ]]; then
   export K3SLAB_INGRESS_HOST
-  envsubst '${K3SLAB_INGRESS_HOST}' <manifests/gitea-ingress.yml.template | kubectl apply -f -
+  envsubst '${K3SLAB_INGRESS_HOST}' <manifests/gitea-ingress.yml.template >"${tmp_gitea_ing}"
+elif [[ -f manifests/gitea-ingress.yml ]]; then
+  sed "s/host: localhost/host: ${K3SLAB_INGRESS_HOST}/" manifests/gitea-ingress.yml >"${tmp_gitea_ing}"
+else
+  echo "[gitops-lab] missing gitea ingress manifest" >&2
+  exit 1
 fi
+kubectl apply -f "${tmp_gitea_ing}"
+rm -f "${tmp_gitea_ing}"
 
 kubectl -n gitops-lab rollout status deploy/gitea --timeout=300s
 kubectl -n gitops-lab wait --for=condition=Ready pod -l app=gitea --timeout=300s
@@ -86,6 +93,19 @@ if [[ -z "${BCRYPT_HASH}" || "${BCRYPT_HASH}" != \$2* ]]; then
   echo "[gitops-lab] Failed to generate bcrypt hash for student password" >&2
   exit 1
 fi
+
+# Argo watches the in-cluster Gitea URL; Gitea webhooks advertise ROOT_URL (ingress host).
+# webhook-proxy rewrites the payload host so Argo matches the Application.
+echo "[gitops-lab] Installing Gitea → Argo webhook URL rewrite proxy..."
+tmp_proxy="$(mktemp)"
+# Escape sed replacement specials in ingress host.
+proxy_from="http://${K3SLAB_INGRESS_HOST}/gitea"
+proxy_from_esc="$(printf '%s' "${proxy_from}" | sed -e 's/[&|\\]/\\&/g')"
+sed -e "s|value: http://localhost/gitea|value: ${proxy_from_esc}|" \
+  manifests/webhook-proxy.yml >"${tmp_proxy}"
+kubectl apply -f "${tmp_proxy}"
+rm -f "${tmp_proxy}"
+kubectl -n gitops-lab rollout status deploy/gitops-webhook-proxy --timeout=180s
 
 VALUES_FILE="$(mktemp)"
 cat >"${VALUES_FILE}" <<EOF
@@ -135,11 +155,18 @@ helm upgrade --install argocd argo-cd \
   --wait --timeout 8m
 rm -f "${VALUES_FILE}"
 
-if [[ -f manifests/argocd-ingress.yml ]]; then
-  kubectl apply -f manifests/argocd-ingress.yml
+tmp_argocd_ing="$(mktemp)"
+if [[ -f manifests/argocd-ingress.yml.template ]]; then
+  export K3SLAB_INGRESS_HOST
+  envsubst '${K3SLAB_INGRESS_HOST}' <manifests/argocd-ingress.yml.template >"${tmp_argocd_ing}"
+elif [[ -f manifests/argocd-ingress.yml ]]; then
+  sed "s/host: localhost/host: ${K3SLAB_INGRESS_HOST}/" manifests/argocd-ingress.yml >"${tmp_argocd_ing}"
 else
-  envsubst '${K3SLAB_INGRESS_HOST}' <manifests/argocd-ingress.yml.template | kubectl apply -f -
+  echo "[gitops-lab] missing argocd ingress manifest" >&2
+  exit 1
 fi
+kubectl apply -f "${tmp_argocd_ing}"
+rm -f "${tmp_argocd_ing}"
 
 kubectl -n argocd rollout status deploy/argocd-server --timeout=300s
 kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=300s
@@ -201,5 +228,5 @@ kubectl config set-context --current --namespace=gitops-lab >/dev/null
 echo "[gitops-lab] Ready."
 echo "[gitops-lab] Argo CD UI: http://${K3SLAB_INGRESS_HOST}/argocd/  (user=${STUDENT_ID} pass=${STUDENT_ID})"
 echo "[gitops-lab] Gitea:      http://${K3SLAB_INGRESS_HOST}/gitea/"
-echo "[gitops-lab] Git remote: http://gitops:gitops123@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git"
+echo "[gitops-lab] Git remote (in-cluster): http://<student>:<student>@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git"
 echo "[gitops-lab] Sync: Gitea push webhook → Argo CD (poll backup every 180s)"
