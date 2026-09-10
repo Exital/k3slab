@@ -1,0 +1,274 @@
+name: GitOps with Gitea and Argo CD
+description: "Ship changes through Git: explore Argo CD, fix a half-ready app in Gitea, and let GitOps deploy it."
+
+tabs:
+  steps:
+    - id: prepare-lab
+      type: task
+      title: Prepare the GitOps lab
+      run: bash scripts/setup.sh
+
+    - id: question-argocd-ui-ticket
+      type: question
+      title: Log into Argo CD and find the ticket
+      description: |
+        **Platform ticket #1:** GitOps is half set up. Prove you can reach Argo CD.
+
+        1. Read your student id from the environment and normalize spaces to underscores:
+           `echo "${student_username:-student}" | sed -E 's/[[:space:]]+/_/g'`
+        2. Open the Argo CD UI at **`http://<ingress-host>/argocd/`** (default **`http://localhost/argocd/`**, or use **Open in browser**).
+        3. Log in with **username = that string** and **password = the same string** (same credentials work on Gitea too).
+        4. Open Application **`demo-app`**. On the app summary, find the **info** field named **`ticket`** and paste its value here.
+      answer_type: text
+      correct_message: |
+        You're in. That ticket id is on the Application Argo CD is watching.
+      incorrect_message: |
+        Not quite — open **demo-app** in Argo CD and look at the Application **info** / summary field named **`ticket`** (value like `PLATFORM-GITOPS-7`).
+      verify: |
+        expected=$(kubectl -n argocd get application demo-app -o json 2>/dev/null \
+          | jq -r '.spec.info[]? | select(.name=="ticket") | .value' | head -n 1)
+        test -n "$expected"
+        test "$ANSWER" = "$expected"
+      solution_answer_script: |
+        set -euo pipefail
+        for _ in $(seq 1 90); do
+          ticket=$(kubectl -n argocd get application demo-app -o json 2>/dev/null \
+            | jq -r '.spec.info[]? | select(.name=="ticket") | .value' | head -n 1 || true)
+          if [[ -n "${ticket}" && "${ticket}" != "null" ]]; then
+            printf '%s\n' "${ticket}"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "demo-app spec.info ticket not found" >&2
+        exit 1
+      hints:
+        - "`echo \"${student_username:-student}\" | sed -E 's/[[:space:]]+/_/g'` — Argo (and Gitea) username and password are both that value"
+        - "UI: `http://${K3SLAB_INGRESS_HOST:-localhost}/argocd/`"
+        - "Application **demo-app** → summary **info** → field **ticket**"
+
+    - id: question-inspect-broken
+      type: question
+      title: Inspect the broken Service selector
+      description: |
+        **Platform ticket #2:** pods are up, but nothing answers on the Service.
+
+        In namespace **`gitops-lab`**, inspect Deployment **`demo-app`**, Service **`demo-app`**, and Endpoints.
+        The Service selector does **not** match the pod labels.
+
+        What is the Service **`demo-app`** selector value for label **`app`**? (the wrong value currently in the cluster / in Git)
+      answer_type: text
+      correct_message: |
+        Right — selector `app=demo` does not match pods labeled `app=demo-app`, so Endpoints stay empty.
+      incorrect_message: |
+        Check `kubectl get svc demo-app -o yaml` (or `-o jsonpath='{.spec.selector.app}'`) and paste that `app` value.
+      verify: |
+        ready=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "${ready:-0}" -ge 1
+        sel=$(kubectl -n gitops-lab get svc demo-app -o jsonpath='{.spec.selector.app}' 2>/dev/null)
+        test -n "$sel"
+        test "$ANSWER" = "$sel"
+        # Still broken at this step
+        test "$sel" = "demo"
+        addrs=$(kubectl -n gitops-lab get endpoints demo-app -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
+        test -z "${addrs}"
+      solution_answer: "demo"
+      hints:
+        - "`kubectl get svc demo-app -o jsonpath='{.spec.selector.app}{\"\\n\"}'`"
+        - "`kubectl get pods --show-labels` — compare to the Service selector"
+        - "Endpoints should be empty while the selector is wrong"
+
+    - id: question-fix-via-git
+      type: question
+      title: Fix the selector in Git and push
+      description: |
+        **Platform ticket #3:** repair GitOps the right way.
+
+        Clone the repo, fix Service **`demo-app`** so its selector is **`app: demo-app`** (matching the pods), commit, and push.
+        Argo CD auto-syncs from Gitea — do **not** treat `kubectl edit` as the source of truth.
+
+        Use the **same credentials as Argo CD** (your normalized `student_username`). Build the clone URL with:
+        `id=$(echo "${student_username:-student}" | sed -E 's/[[:space:]]+/_/g'); echo "http://${id}:${id}@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git"`
+
+        A **Gitea push webhook** notifies Argo CD immediately (you should not need to wait for the poll interval).
+
+        This step completes automatically when the Service has endpoints and Argo shows **Synced**.
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        Nice — Git was updated, Argo synced, and the Service finally selects the pods.
+      verify: |
+        sel=$(kubectl -n gitops-lab get svc demo-app -o jsonpath='{.spec.selector.app}' 2>/dev/null)
+        test "$sel" = "demo-app"
+        addrs=$(kubectl -n gitops-lab get endpoints demo-app -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
+        test -n "${addrs}"
+        sync=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null)
+        test "$sync" = "Synced"
+      solution_script: |
+        set -euo pipefail
+        id="$(printf '%s' "${student_username:-student}" | sed -E 's/[[:space:]]+/_/g')"
+        git config --global --add safe.directory '*' || true
+        work=$(mktemp -d /tmp/demo-app-fix.XXXXXX)
+        git clone -q "http://${id}:${id}@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git" "$work/repo"
+        cd "$work/repo"
+        if grep -q 'app: demo$' service.yml; then
+          sed -i 's/app: demo$/app: demo-app/' service.yml
+        fi
+        sel=$(awk '/selector:/{f=1} f&&/app:/{print $2; exit}' service.yml)
+        if [[ "$sel" != "demo-app" ]]; then
+          sed -i 's/app: .*/app: demo-app/' service.yml
+        fi
+        git config user.email "${id}@k3slab.local"
+        git config user.name "${id}"
+        git add service.yml
+        git commit -q -m "Fix Service selector to match demo-app pods" || true
+        git push -q origin HEAD:main
+        for _ in $(seq 1 60); do
+          sel=$(kubectl -n gitops-lab get svc demo-app -o jsonpath='{.spec.selector.app}' 2>/dev/null || true)
+          addrs=$(kubectl -n gitops-lab get endpoints demo-app -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
+          sync=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
+          if [[ "$sel" == "demo-app" && -n "$addrs" && "$sync" == "Synced" ]]; then
+            exit 0
+          fi
+          sleep 5
+        done
+        echo "timed out waiting for GitOps sync after selector fix" >&2
+        exit 1
+      hints:
+        - "`id=$(echo \"${student_username:-student}\" | sed -E 's/[[:space:]]+/_/g'); git clone http://${id}:${id}@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git`"
+        - "Edit `service.yml` selector to `app: demo-app`, then `git commit` and `git push`"
+        - "`kubectl -n argocd get applications` — wait for Synced; `kubectl get endpoints demo-app`"
+
+    - id: question-gitops-concept
+      type: question
+      title: Pull-based GitOps
+      description: |
+        Which statement best describes how this lab's Argo CD Application works?
+      answer_type: single_choice
+      options:
+        - Argo CD pulls desired state from Git and reconciles the cluster toward that state (pull-based GitOps).
+        - The cluster pushes every kubectl change into Git automatically with no Application object.
+        - GitOps only works if you disable Deployments and apply YAML by hand each time.
+      verify: |
+        test "$ANSWER" = "Argo CD pulls desired state from Git and reconciles the cluster toward that state (pull-based GitOps)."
+      solution_answer: "Argo CD pulls desired state from Git and reconciles the cluster toward that state (pull-based GitOps)."
+      correct_message: |
+        Exactly — Argo CD continuously compares Git to the live cluster and syncs toward Git.
+      hints:
+        - "Think about who initiates the reconcile: the GitOps controller or kubectl"
+
+    - id: question-scale-via-git
+      type: question
+      title: Scale replicas through Git
+      description: |
+        **Platform ticket #4:** traffic is climbing.
+
+        In the Gitea repo, set Deployment **`demo-app`** **`spec.replicas`** to **2**, commit, and push.
+        Wait for Argo CD to sync so two pods are ready.
+
+        This step completes automatically when the Deployment has 2 ready replicas and the Application is **Synced**.
+      answer_type: observe
+      poll_interval_seconds: 5
+      correct_message: |
+        Scaled via Git — Argo CD applied the new desired replica count.
+      verify: |
+        replicas=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.spec.replicas}' 2>/dev/null)
+        ready=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "${replicas:-0}" = "2"
+        test "${ready:-0}" = "2"
+        sync=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null)
+        test "$sync" = "Synced"
+      solution_script: |
+        set -euo pipefail
+        id="$(printf '%s' "${student_username:-student}" | sed -E 's/[[:space:]]+/_/g')"
+        git config --global --add safe.directory '*' || true
+        work=$(mktemp -d /tmp/demo-app-scale.XXXXXX)
+        git clone -q "http://${id}:${id}@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git" "$work/repo"
+        cd "$work/repo"
+        sed -i 's/replicas: .*/replicas: 2/' deployment.yml
+        git config user.email "${id}@k3slab.local"
+        git config user.name "${id}"
+        git add deployment.yml
+        git commit -q -m "Scale demo-app to 2 replicas" || true
+        git push -q origin HEAD:main
+        for _ in $(seq 1 60); do
+          replicas=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.spec.replicas}' 2>/dev/null || true)
+          ready=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)
+          sync=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
+          if [[ "${replicas:-0}" == "2" && "${ready:-0}" == "2" && "$sync" == "Synced" ]]; then
+            exit 0
+          fi
+          sleep 5
+        done
+        echo "timed out waiting for scale via GitOps" >&2
+        exit 1
+      hints:
+        - "Same student clone URL; set `replicas: 2` in `deployment.yml`, commit, push"
+        - "`kubectl get deploy demo-app -w` and `kubectl -n argocd get applications`"
+
+    - id: question-source-of-truth
+      type: question
+      title: Source of truth
+      description: |
+        In a GitOps workflow like this lab, what should be the source of truth for desired state?
+      answer_type: single_choice
+      options:
+        - The Git repository watched by Argo CD — avoid long-lived kubectl edits that drift from Git.
+        - Whatever happens to be running in the cluster after the last kubectl edit.
+        - Only the Argo CD admin password Secret.
+      verify: |
+        test "$ANSWER" = "The Git repository watched by Argo CD — avoid long-lived kubectl edits that drift from Git."
+      solution_answer: "The Git repository watched by Argo CD — avoid long-lived kubectl edits that drift from Git."
+      correct_message: |
+        Right. Change Git, let the controller reconcile — that keeps the cluster auditable and repeatable.
+      hints:
+        - "Self-heal was enabled on the Application for a reason"
+
+  markdowns:
+    - id: mission-brief
+      title: Mission brief
+      icon: emergency
+      content: |
+        ## GitOps: Lab 5
+
+        Ops left a GitOps pipeline half-finished. Finish it.
+
+        1. Log into **Argo CD** and read the **ticket** info field on **`demo-app`**.
+        2. Inspect the broken Service selector in **`gitops-lab`**.
+        3. Fix and scale the app by **committing to Gitea** (same login as Argo) — Argo CD syncs for you.
+
+        Namespace: **`gitops-lab`** (default after setup). Argo CD lives in **`argocd`**.
+
+    - id: cheat-sheet
+      title: Cheat sheet
+      icon: description
+      content: |
+        ## Credentials and URLs
+
+        - Argo CD UI: `http://<ingress-host>/argocd/` (default `http://localhost/argocd/`)
+        - Gitea UI: `http://<ingress-host>/gitea/`
+        - Login for **both** Argo CD and Gitea (username = password):
+          `echo "${student_username:-student}" | sed -E 's/[[:space:]]+/_/g'`
+        - Git clone (in-cluster), using that same id:
+          `id=$(echo "${student_username:-student}" | sed -E 's/[[:space:]]+/_/g')`
+          `git clone http://${id}:${id}@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git`
+        - After `git push`, Gitea webhooks Argo CD for an immediate refresh (poll backup ~180s)
+
+        ## Useful commands
+
+        - `kubectl -n argocd get applications`
+        - `kubectl -n argocd get application demo-app -o yaml`
+        - `kubectl get deploy,pods,svc,endpoints -n gitops-lab`
+        - `git clone … && edit && git commit && git push`
+
+    - id: gitops-note
+      title: GitOps note
+      icon: info
+      content: |
+        ## How this lab is wired
+
+        - **Gitea** holds desired state for `demo-app` (platform user `gitops` seeds the repo; your student user has admin on it).
+        - **Argo CD** Application `demo-app` watches that repo with **automated sync** + **self-heal**.
+        - **Webhook:** Gitea sends a push hook (Gogs-compatible) to Argo CD (`/argocd/api/webhook`) so syncs start right after `git push`, not only on the reconciliation poll (backup ~180s).
+        - Live `kubectl edit` fights GitOps: self-heal will revert drift back toward Git.
+        - Ticket is on the Application as **info** field `ticket` (= `PLATFORM-GITOPS-7`) in the Argo CD UI summary.

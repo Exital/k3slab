@@ -1,0 +1,9 @@
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: gitea-stripprefix
+  namespace: gitops-lab
+spec:
+  stripPrefix:
+    prefixes:
+      - /gitea

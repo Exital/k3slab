@@ -40,6 +40,7 @@ If a workshop or your own manifests create **NodePort** Services or **Ingress** 
 | **Deployment Basics** (`02-deployment-basics`) | `-p 3010:3010` **and** `-p 80:80` | **`http://<ingress-host>/ctf/`** (default **`http://localhost/ctf/`**) for the [simple-ctf](https://github.com/Exital/simple-ctf) app |
 | **Workloads, Probes, and Autoscaling** (`03-workloads-probes-scaling`) | `-p 3010:3010` **and** `-p 80:80` | **`http://<ingress-host>/load-dashboard/`** + HPA challenge |
 | **Helm, RBAC, and Network Policies** (`04-helm-rbac-netpol`) | `-p 3010:3010` | Workshop UI only |
+| **GitOps with Gitea and Argo CD** (`05-gitops-argocd`) | `-p 3010:3010` **and** `-p 80:80` | **`http://<ingress-host>/argocd/`** (Argo CD UI) and **`http://<ingress-host>/gitea/`** |
 
 Example for the deployment lab:
 
@@ -70,6 +71,7 @@ For other Ingress or NodePort workloads, publish the matching ports and set **`K
 - **`K3SLAB_PUBLIC_ORIGIN`** (optional): scheme + host for **NodePort** links. Default `http://localhost`.
 - **`K3SLAB_INGRESS_HOST`** (optional): **hostname** for Ingress `rules[].host` in templated lab manifests and workshop verify curls. Default **`localhost`**. Use the **machine hostname** on a VM (e.g. `k3slab-vm`), not an IP address.
 - **`K3SLAB_INGRESS_HTTP_PORT`** / **`K3SLAB_INGRESS_HTTPS_PORT`** (optional): defaults **80** / **443** for Ingress URLs if you customized the ingress controller.
+- **`student_username`** (optional): used by **`05-gitops-argocd`**. Spaces are collapsed to **`_`**; the result is both the **Argo CD username and password** (default **`student`** if unset). Example: `-e student_username='Jane Doe'` → login **`Jane_Doe`** / **`Jane_Doe`**.
 - **`k9s_enable`** (optional): default **`false`**. Set to **`true`** (or `1` / `yes`) to put the pre-installed **k9s** binary on `PATH`. The image bundles k9s at `/usr/local/lib/k3slab/k9s`; the entrypoint symlinks it to `/usr/local/bin/k9s` only when enabled.
 - **`K3SLAB_DEBUG`** (optional): set to **`true`** (or `1` / `yes`) to log exposure watcher sync/resync messages (`exposure: synced …`, `exposure: periodic resync …`). Off by default so routine logs stay quiet.
 - **`K3SLAB_ALLOW_CLUSTER_RESET`** (optional): default **`true`**. Set to **`false`** (or `0` / `no`) to disable **Restart lab** and **lab switching** (`POST /api/lab/restart`, `POST /api/labs/select`).
@@ -189,7 +191,7 @@ Labs live under **`LABS_ROOT`** (default **`/lab`**). Each **immediate subdirect
 
 #### Lab order in the picker and menu
 
-The catalog is sorted **alphabetically by folder name** (the lab `id`). To control display order, prefix directory names with numbers. Shipped labs: **`01-kubectl-basics`**, **`02-deployment-basics`**, **`03-workloads-probes-scaling`**.
+The catalog is sorted **alphabetically by folder name** (the lab `id`). To control display order, prefix directory names with numbers. Shipped labs: **`01-kubectl-basics`**, **`02-deployment-basics`**, **`03-workloads-probes-scaling`**, **`04-helm-rbac-netpol`**, **`05-gitops-argocd`**.
 
 Mount your own lab tree:
 
@@ -263,8 +265,9 @@ If reset fails, restart the container (`docker run …` again) for a clean slate
 | [lab/02-deployment-basics](lab/02-deployment-basics) | **Deployment Basics** — fix Deployment/Service/Ingress for [simple-ctf](https://github.com/Exital/simple-ctf) at `/ctf` |
 | [lab/03-workloads-probes-scaling](lab/03-workloads-probes-scaling) | **Workloads, Probes, and Autoscaling** — rollback control, probe behavior, and HPA basics |
 | [lab/04-helm-rbac-netpol](lab/04-helm-rbac-netpol) | **Helm, RBAC, and Network Policies** — Helm install/upgrade, least-privilege RBAC, NetworkPolicy containment |
+| [lab/05-gitops-argocd](lab/05-gitops-argocd) | **GitOps with Gitea and Argo CD** — in-cluster Gitea, Argo CD UI login, fix/scale via Git |
 | [app/frontend](app/frontend) | Vite + React + Tailwind + xterm.js |
-| [lab](lab) | Baked-in labs tree (`01-kubectl-basics/`, `02-deployment-basics/`, `03-workloads-probes-scaling/`, …) |
+| [lab](lab) | Baked-in labs tree (`01-kubectl-basics/` … `05-gitops-argocd/`, …) |
 
 ## Writing workshops (`workshop.yml`)
 

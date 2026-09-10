@@ -5,6 +5,7 @@ RUN_IMAGE ?= k3slab:latest
 CONTAINER ?= k3slab
 LAB ?= 01-kubectl-basics
 INGRESS_HOST ?= localhost
+STUDENT_USERNAME ?= student
 DOCKERFILE := docker/Dockerfile
 REPORT_VOL := k3slab-test-reports
 
@@ -19,6 +20,7 @@ run: run-build
 		-p 80:80 \
 		-e LAB_ID=$(LAB) \
 		-e K3SLAB_INGRESS_HOST=$(INGRESS_HOST) \
+		-e student_username=$(STUDENT_USERNAME) \
 		-e k9s_enable=true \
 		$(RUN_IMAGE)
 
