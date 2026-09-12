@@ -15,7 +15,6 @@ progress() {
 
 METRICS_SERVER_IMAGE="${METRICS_SERVER_IMAGE:-registry.k8s.io/metrics-server/metrics-server:v0.9.0}"
 NGINX_IMAGE="${NGINX_IMAGE:-docker.io/library/nginx:1.27-alpine}"
-HPA_EXAMPLE_IMAGE="${HPA_EXAMPLE_IMAGE:-registry.k8s.io/hpa-example}"
 PYTHON_IMAGE="${PYTHON_IMAGE:-docker.io/library/python:3.12-alpine}"
 BUSYBOX_IMAGE="${BUSYBOX_IMAGE:-docker.io/library/busybox:1.36}"
 
@@ -25,7 +24,6 @@ pull_pids=()
 for img in \
   "${METRICS_SERVER_IMAGE}" \
   "${NGINX_IMAGE}" \
-  "${HPA_EXAMPLE_IMAGE}" \
   "${PYTHON_IMAGE}" \
   "${BUSYBOX_IMAGE}"; do
   k3s ctr images pull "${img}" &
@@ -39,6 +37,9 @@ if [[ "${pull_ec}" -ne 0 ]]; then
   echo "[workloads-lab] One or more image pulls failed" >&2
   exit 1
 fi
+# registry.k8s.io/hpa-example is pulled by the kubelet when autoscale-api starts
+# (pinned by digest in manifests/autoscale-app.yml). k3s ctr cannot unpack it with
+# the native snapshotter (whiteout .wh.partial).
 
 progress 35 "Installing metrics-server"
 # Ensure resource metrics exist for HPA and dashboard graphs (pinned + lab args baked in).

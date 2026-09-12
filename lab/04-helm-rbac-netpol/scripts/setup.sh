@@ -27,12 +27,13 @@ kubectl -n platform-lab get sa default >/dev/null
 
 progress 30 "Pre-pulling images"
 # Pre-pull chart/job images so Helm install and RBAC job are not racing registries on cold CI.
-echo "[platform-lab] Pre-pulling nginx, busybox, and bitnami/kubectl in parallel..."
+# bitnami/kubectl was relocated; bitnamilegacy keeps the old tags.
+echo "[platform-lab] Pre-pulling nginx, busybox, and kubectl in parallel..."
 pull_pids=()
 for img in \
   docker.io/library/nginx:1.27-alpine \
   docker.io/library/busybox:1.36 \
-  docker.io/bitnami/kubectl:1.31; do
+  docker.io/bitnamilegacy/kubectl:1.31; do
   k3s ctr images pull "${img}" &
   pull_pids+=("$!")
 done

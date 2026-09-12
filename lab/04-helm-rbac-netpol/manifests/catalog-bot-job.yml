@@ -14,7 +14,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: list-pods
-          image: bitnami/kubectl:1.31
+          image: bitnamilegacy/kubectl:1.31
           command:
             - /bin/sh
             - -c
