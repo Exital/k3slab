@@ -3,15 +3,27 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+progress() {
+  local pct="$1"
+  shift
+  if command -v k3slab-progress >/dev/null 2>&1; then
+    k3slab-progress "${pct}" "$@"
+  else
+    printf '::k3slab-progress::%s::%s\n' "${pct}" "$*"
+  fi
+}
+
 export K3SLAB_INGRESS_HOST="${K3SLAB_INGRESS_HOST:-localhost}"
 
 INGRESS_NGINX_CHART_VERSION="${INGRESS_NGINX_CHART_VERSION:-4.12.1}"
 # Must match chart appVersion / controller.image.tag for ${INGRESS_NGINX_CHART_VERSION}.
 INGRESS_NGINX_IMAGE="${INGRESS_NGINX_IMAGE:-registry.k8s.io/ingress-nginx/controller:v1.12.1}"
 
+progress 10 "Pre-pulling ingress-nginx"
 echo "[deployment-basics] Pre-pulling ingress-nginx controller ${INGRESS_NGINX_IMAGE}..."
 k3s ctr images pull "${INGRESS_NGINX_IMAGE}"
 
+progress 30 "Installing ingress-nginx"
 echo "[deployment-basics] Installing ingress-nginx (Helm ${INGRESS_NGINX_CHART_VERSION})..."
 helm upgrade --install ingress-nginx ingress-nginx \
   --repo https://kubernetes.github.io/ingress-nginx \
@@ -30,6 +42,7 @@ helm upgrade --install ingress-nginx ingress-nginx \
   --set controller.ingressClassResource.default=true \
   --set controller.watchIngressWithoutClass=true
 
+progress 85 "Configuring ingress host"
 # When lab manifests are read-only (e.g. make test-lab), patch the live Ingress host.
 if [[ "${K3SLAB_INGRESS_HOST}" != "localhost" ]]; then
   for _ in $(seq 1 60); do
@@ -46,4 +59,5 @@ if [[ "${K3SLAB_INGRESS_HOST}" != "localhost" ]]; then
   done
 fi
 
+progress 95 "Finishing"
 echo "[deployment-basics] ingress-nginx is ready."

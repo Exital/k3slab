@@ -14,6 +14,7 @@ import (
 	"k3slab/kube"
 	"k3slab/labmanifest"
 	"k3slab/loghub"
+	"k3slab/progress"
 	"k3slab/workshop"
 )
 
@@ -38,16 +39,18 @@ type Engine struct {
 	lastVerify  strings.Builder
 	lastTaskOut strings.Builder
 
-	labRoot string
-	hub     *loghub.Hub
+	labRoot  string
+	hub      *loghub.Hub
+	progress *progress.Hub
 }
 
 // New builds an engine from a parsed workshop.
-func New(w *workshop.Workshop, labRoot string, hub *loghub.Hub) *Engine {
+func New(w *workshop.Workshop, labRoot string, hub *loghub.Hub, progressHub *progress.Hub) *Engine {
 	return &Engine{
 		w:         w,
 		labRoot:   labRoot,
 		hub:       hub,
+		progress:  progressHub,
 		current:   0,
 		setupDone: make(map[int]bool),
 		completed: make(map[int]bool),
@@ -55,8 +58,8 @@ func New(w *workshop.Workshop, labRoot string, hub *loghub.Hub) *Engine {
 }
 
 // NewLoadError returns an engine that only reports a load/parse error.
-func NewLoadError(err error, labRoot string, hub *loghub.Hub) *Engine {
-	return &Engine{loadErr: err, labRoot: labRoot, hub: hub}
+func NewLoadError(err error, labRoot string, hub *loghub.Hub, progressHub *progress.Hub) *Engine {
+	return &Engine{loadErr: err, labRoot: labRoot, hub: hub, progress: progressHub}
 }
 
 // LabRoot is the directory used as cwd for workshop shell commands.
@@ -258,6 +261,11 @@ func (e *Engine) RunTask(ctx context.Context) (logs string, err error) {
 		return e.lastTaskOut.String(), nil
 	}
 	e.lastTaskOut.Reset()
+	e.progress.Reset()
+	ok := false
+	defer func() {
+		e.progress.Finish(ok)
+	}()
 	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
 	defer cancel()
 	code, err := e.runShell(ctx, st.Run, &e.lastTaskOut, e.hub)
@@ -271,6 +279,7 @@ func (e *Engine) RunTask(ctx context.Context) (logs string, err error) {
 	e.current++
 	e.lastSetup.Reset()
 	e.lastVerify.Reset()
+	ok = true
 	return e.lastTaskOut.String(), nil
 }
 
@@ -289,11 +298,17 @@ func (e *Engine) RunQuestionSetup(ctx context.Context) (logs string, err error) 
 		return e.lastSetup.String(), nil
 	}
 	e.lastSetup.Reset()
+	e.progress.Reset()
+	ok := false
+	defer func() {
+		e.progress.Finish(ok)
+	}()
 	ctx, cancel := context.WithTimeout(ctx, setupTimeout)
 	defer cancel()
 	_ = labmanifest.RenderDir(e.labRoot)
 	if len(st.Setup) == 0 {
 		e.setupDone[e.current] = true
+		ok = true
 		return "", nil
 	}
 	for _, setupCmd := range st.Setup {
@@ -320,6 +335,7 @@ func (e *Engine) RunQuestionSetup(ctx context.Context) (logs string, err error) 
 		}
 	}
 	e.setupDone[e.current] = true
+	ok = true
 	return e.lastSetup.String(), nil
 }
 
@@ -546,6 +562,10 @@ func (e *Engine) drainPipe(r io.Reader, accum *strings.Builder, hub *loghub.Hub,
 				s := string(line)
 				buf.Reset()
 				buf.Write(rest)
+				if pct, msg, ok := progress.ParseLine(s); ok {
+					e.progress.Set(pct, msg)
+					continue
+				}
 				out := prefix + s
 				if accum != nil {
 					if accum.Len() > 0 {
@@ -560,15 +580,20 @@ func (e *Engine) drainPipe(r io.Reader, accum *strings.Builder, hub *loghub.Hub,
 		}
 		if err != nil {
 			if buf.Len() > 0 {
-				s := prefix + buf.String()
+				s := buf.String()
+				if pct, msg, ok := progress.ParseLine(s); ok {
+					e.progress.Set(pct, msg)
+					return
+				}
+				out := prefix + s
 				if accum != nil {
 					if accum.Len() > 0 {
 						accum.WriteByte('\n')
 					}
-					accum.WriteString(s)
+					accum.WriteString(out)
 				}
 				if hub != nil {
-					hub.Broadcast(s)
+					hub.Broadcast(out)
 				}
 			}
 			return

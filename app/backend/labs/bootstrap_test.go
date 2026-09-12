@@ -19,7 +19,7 @@ import (
 func testManager(t *testing.T, w *workshop.Workshop, labRoot string) *Manager {
 	t.Helper()
 	hub := loghub.New()
-	eng := engine.New(w, labRoot, hub)
+	eng := engine.New(w, labRoot, hub, nil)
 	return &Manager{
 		labsRoot:   labRoot,
 		activeID:   "test-lab",

@@ -154,7 +154,7 @@ func runLab(ctx context.Context, cfg Config, labID string) ([]Result, error) {
 	}
 
 	hub := loghub.New()
-	eng, err := labs.LoadEngine(cfg.LabsRoot, labID, hub)
+	eng, err := labs.LoadEngine(cfg.LabsRoot, labID, hub, nil)
 	if err != nil {
 		return nil, err
 	}

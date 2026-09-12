@@ -23,6 +23,7 @@ import { LabPicker, LabSwitcher } from "./LabPicker";
 import { MarkdownContent } from "./components/MarkdownContent";
 import { MIcon } from "./components/MIcon";
 import { useExposedEndpoints } from "./hooks/useExposedEndpoints";
+import { useSetupProgress } from "./hooks/useSetupProgress";
 import { useTerminalDetach } from "./hooks/useTerminalDetach";
 import { useTerminalSession } from "./terminal/session";
 import { TerminalView } from "./terminal/TerminalView";
@@ -162,6 +163,7 @@ export default function App({ theme, setTheme }: AppProps) {
   const [state, setState] = useState<WorkshopState | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [setupCompleteFlash, setSetupCompleteFlash] = useState(false);
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [answer, setAnswer] = useState("");
   const [verifyOutcome, setVerifyOutcome] = useState<VerifyOutcome>("idle");
@@ -345,7 +347,7 @@ export default function App({ theme, setTheme }: AppProps) {
   }, [labRestartFailed, labRestarting, refresh, updateClusterStatus]);
 
   useEffect(() => {
-    if (labRestarting || bootstrapRunning || !clusterReady || !state || state.error || state.done || !state.current) return;
+    if (labRestarting || bootstrapRunning || bootstrapFailed || !clusterReady || !state || state.error || state.done || !state.current) return;
 
     const key = `${state.currentStepIndex}:${state.current.id}:${state.current.type}`;
     const run = async () => {
@@ -357,9 +359,12 @@ export default function App({ theme, setTheme }: AppProps) {
         try {
           const r = await runTask();
           setState(r.state);
+          setSetupCompleteFlash(true);
+          await new Promise((r) => window.setTimeout(r, 280));
+          setSetupCompleteFlash(false);
         } catch (e) {
           setActionErr(String(e));
-          autoKey.current = "";
+          // Keep autoKey set so we do not immediately re-run a failed setup in a loop.
         } finally {
           setBusy(false);
         }
@@ -376,9 +381,12 @@ export default function App({ theme, setTheme }: AppProps) {
         try {
           const r = await runQuestionSetup();
           setState(r.state);
+          setSetupCompleteFlash(true);
+          await new Promise((r) => window.setTimeout(r, 280));
+          setSetupCompleteFlash(false);
         } catch (e) {
           setActionErr(String(e));
-          autoKey.current = "";
+          // Keep autoKey set so we do not immediately re-run a failed setup in a loop.
         } finally {
           setBusy(false);
         }
@@ -386,7 +394,7 @@ export default function App({ theme, setTheme }: AppProps) {
     };
 
     void run();
-  }, [bootstrapRunning, clusterReady, labRestarting, state]);
+  }, [bootstrapFailed, bootstrapRunning, clusterReady, labRestarting, state]);
 
   useEffect(() => {
     if (state?.current?.type === "question") {
@@ -618,11 +626,20 @@ export default function App({ theme, setTheme }: AppProps) {
   const overlayLabel = useMemo(() => {
     if (bootstrapRunning) return "Preparing environment…";
     if (bootstrapFailed) return null;
+    if (setupCompleteFlash) {
+      if (current?.type === "question") return "Setting up…";
+      return "Preparing environment…";
+    }
     if (!busy || !current) return null;
     if (current.type === "task") return "Preparing environment…";
     if (current.type === "question" && !current.setupDone) return "Setting up…";
     return null;
-  }, [bootstrapFailed, bootstrapRunning, busy, current]);
+  }, [bootstrapFailed, bootstrapRunning, busy, current, setupCompleteFlash]);
+
+  const setupProgressActive = Boolean(overlayLabel);
+  const setupProgress = useSetupProgress(setupProgressActive);
+  const setupPct = setupCompleteFlash ? 100 : setupProgress.pct;
+  const setupMessage = setupProgress.message;
 
   const typeBadge = current?.type === "task" ? "Setup" : current?.type === "question" ? "Task overview" : "";
 
@@ -818,9 +835,20 @@ export default function App({ theme, setTheme }: AppProps) {
           >
             <section className="relative flex h-full min-h-0 flex-col overflow-hidden border-r border-slate-400/20 bg-[#eef1f6] dark:border-k3-outline-variant dark:bg-k3-surface">
               {sidebarView === "workshop" && overlayLabel && (
-                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#eef1f6]/95 backdrop-blur-md dark:bg-k3-surface-lowest/90">
-                  <span className="h-10 w-10 animate-spin rounded-full border-2 border-slate-200 border-t-k3-primary-container dark:border-k3-outline-variant dark:border-t-k3-secondary" />
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-4 bg-[#eef1f6]/95 px-8 backdrop-blur-md dark:bg-k3-surface-lowest/90">
                   <p className="text-sm font-medium text-slate-700 dark:text-k3-on-surface">{overlayLabel}</p>
+                  <div className="w-full max-w-xs">
+                    <div className="mb-1.5 flex items-center justify-between gap-3 text-xs font-medium text-slate-500 dark:text-k3-on-surface-variant">
+                      <span className="min-w-0 truncate">{setupMessage || "\u00a0"}</span>
+                      <span className="shrink-0 tabular-nums">{setupPct}%</span>
+                    </div>
+                    <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-300/70 dark:bg-k3-surface-variant">
+                      <div
+                        className="h-full rounded-full bg-teal-600 transition-[width] duration-300 ease-out dark:bg-k3-secondary"
+                        style={{ width: `${setupPct}%` }}
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
 

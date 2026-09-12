@@ -12,6 +12,7 @@ import (
 	"k3slab/labs"
 	"k3slab/labtest"
 	"k3slab/loghub"
+	"k3slab/progress"
 	"k3slab/server"
 )
 
@@ -50,10 +51,11 @@ func main() {
 	}
 
 	hub := loghub.New()
+	progressHub := progress.New()
 	watcher := exposure.NewWatcher(context.Background())
 	clusterMgr := cluster.NewManager()
 
-	labMgr, err := labs.NewManager(hub, clusterMgr, watcher)
+	labMgr, err := labs.NewManager(hub, clusterMgr, watcher, progressHub)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -63,7 +65,7 @@ func main() {
 		_ = os.Setenv("K3SLAB_TERMINAL_CWD", root)
 	}
 
-	srv, err := server.New(labMgr, hub, watcher, clusterMgr)
+	srv, err := server.New(labMgr, hub, progressHub, watcher, clusterMgr)
 	if err != nil {
 		log.Fatal(err)
 	}

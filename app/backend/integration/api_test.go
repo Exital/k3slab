@@ -16,6 +16,7 @@ import (
 	"k3slab/exposure"
 	"k3slab/labs"
 	"k3slab/loghub"
+	"k3slab/progress"
 	"k3slab/server"
 	"k3slab/workshop"
 )
@@ -84,11 +85,12 @@ func testServer(t *testing.T) *server.Server {
 	hub := loghub.New()
 	cm := cluster.NewManager()
 	watcher := exposure.NewWatcher(context.Background())
-	mgr, err := labs.NewManager(hub, cm, watcher)
+	progressHub := progress.New()
+	mgr, err := labs.NewManager(hub, cm, watcher, progressHub)
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, err := server.New(mgr, hub, watcher, cm)
+	srv, err := server.New(mgr, hub, progressHub, watcher, cm)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -360,6 +360,21 @@ Runs once when the learner reaches this step, then the engine advances automatic
 
 Tasks do **not** support `description`, `setup`, or `verify` in the parser today—only `run`.
 
+#### Publishing setup progress
+
+Long **task** / **question setup** scripts can drive the UI progress bar (replaces the old spinner) by printing markers via **`k3slab-progress`** (installed at `/usr/local/bin/k3slab-progress` in the image):
+
+```bash
+k3slab-progress 25 "Pre-pulling images"
+# … work …
+k3slab-progress 80 "Waiting for rollout"
+```
+
+- First argument is an integer **0–100**; optional remaining args are a short status message.
+- The engine strips these lines from task/setup logs and fans them out over **`GET /api/stream/progress`**.
+- If a script never publishes progress, the overlay stays at **0%** until the step finishes, then jumps to **100%**.
+- Percent is **non-decreasing** for a given run (later lower values are ignored).
+
 #### `question` — learner answer + verification
 
 After setup finishes, the learner submits an answer; the **`verify`** script decides if it is correct.
@@ -524,6 +539,8 @@ A full working file ships as [lab/01-kubectl-basics/workshop.yml](lab/01-kubectl
 - `POST /api/question/check` — runs **verify** for **`observe`** questions (no `ANSWER`); same response shape as submit  
 - `POST /api/question/next` — advance to the next step after the current question was answered correctly  
 - `GET /api/stream/logs` — SSE log stream for setup/task output  
+- `GET /api/progress` — current setup/task progress `{ "pct", "message", "active" }`  
+- `GET /api/stream/progress` — SSE stream of the same progress payload while a task/setup runs  
 - `GET /api/exposed` — JSON `{ "endpoints": [...] }` for NodePort / Ingress browser links  
 - `GET /api/stream/exposed` — SSE stream of the same payload when Services or Ingresses change  
 - `GET /api/ws/terminal` — WebSocket PTY (binary I/O + JSON `{"type":"resize","cols","rows"}` text frames)

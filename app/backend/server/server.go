@@ -18,6 +18,7 @@ import (
 	"k3slab/exposure"
 	"k3slab/labs"
 	"k3slab/loghub"
+	"k3slab/progress"
 )
 
 // Server wires HTTP handlers, static SPA, SSE, and terminal WS.
@@ -25,13 +26,14 @@ type Server struct {
 	mux      *http.ServeMux
 	labMgr   *labs.Manager
 	hub      *loghub.Hub
+	progress *progress.Hub
 	exposure *exposure.Watcher
 	cluster  *cluster.Manager
 	static   fs.FS
 }
 
 // New constructs the HTTP server with routes registered.
-func New(labMgr *labs.Manager, hub *loghub.Hub, watcher *exposure.Watcher, clusterMgr *cluster.Manager) (*Server, error) {
+func New(labMgr *labs.Manager, hub *loghub.Hub, progressHub *progress.Hub, watcher *exposure.Watcher, clusterMgr *cluster.Manager) (*Server, error) {
 	staticFS, err := staticFileSystem()
 	if err != nil {
 		log.Printf("static files: %v", err)
@@ -40,6 +42,7 @@ func New(labMgr *labs.Manager, hub *loghub.Hub, watcher *exposure.Watcher, clust
 		mux:      http.NewServeMux(),
 		labMgr:   labMgr,
 		hub:      hub,
+		progress: progressHub,
 		exposure: watcher,
 		cluster:  clusterMgr,
 		static:   staticFS,
@@ -57,6 +60,8 @@ func New(labMgr *labs.Manager, hub *loghub.Hub, watcher *exposure.Watcher, clust
 	s.mux.HandleFunc("POST /api/question/check", s.handleQuestionCheck)
 	s.mux.HandleFunc("POST /api/question/next", s.handleQuestionNext)
 	s.mux.HandleFunc("GET /api/stream/logs", s.handleLogStream)
+	s.mux.HandleFunc("GET /api/progress", s.handleProgress)
+	s.mux.HandleFunc("GET /api/stream/progress", s.handleProgressStream)
 	s.mux.HandleFunc("GET /api/exposed", s.handleExposed)
 	s.mux.HandleFunc("GET /api/stream/exposed", s.handleExposedStream)
 	s.mux.HandleFunc("GET /api/ws/terminal", s.handleTerminalWS)
@@ -350,6 +355,43 @@ func (s *Server) handleExposed(w http.ResponseWriter, r *http.Request) {
 		snap.Endpoints = []exposure.Endpoint{}
 	}
 	writeJSON(w, snap)
+}
+
+func (s *Server) handleProgress(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.progress.Snapshot())
+}
+
+func (s *Server) handleProgressStream(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "stream unsupported", http.StatusInternalServerError)
+		return
+	}
+	writeProgressSSE(w, flusher, s.progress.Snapshot())
+	ch := s.progress.Subscribe()
+	defer s.progress.Unsubscribe(ch)
+	for {
+		select {
+		case snap, open := <-ch:
+			if !open {
+				return
+			}
+			writeProgressSSE(w, flusher, snap)
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+func writeProgressSSE(w http.ResponseWriter, flusher http.Flusher, snap progress.Snapshot) {
+	b, _ := json.Marshal(snap)
+	_, _ = w.Write([]byte("data: "))
+	_, _ = w.Write(b)
+	_, _ = w.Write([]byte("\n\n"))
+	flusher.Flush()
 }
 
 func (s *Server) handleExposedStream(w http.ResponseWriter, r *http.Request) {

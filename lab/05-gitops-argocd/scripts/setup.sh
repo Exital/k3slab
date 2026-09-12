@@ -193,6 +193,18 @@ EOF
 
 # --- main --------------------------------------------------------------------
 
+progress() {
+  local pct="$1"
+  shift
+  if command -v k3slab-progress >/dev/null 2>&1; then
+    k3slab-progress "${pct}" "$@"
+  else
+    # Fallback when the helper is not on PATH (local/dev).
+    printf '::k3slab-progress::%s::%s\n' "${pct}" "$*"
+  fi
+}
+
+progress 5 "Applying namespaces"
 echo "[gitops-lab] Applying namespaces..."
 kubectl apply -f manifests/00-namespace.yml
 
@@ -205,6 +217,7 @@ for _ in $(seq 1 60); do
 done
 kubectl -n gitops-lab get sa default >/dev/null
 
+progress 15 "Pre-pulling images"
 echo "[gitops-lab] Pre-pulling images in parallel (Gitea, nginx, redis, Argo CD, python)..."
 pull_pids=()
 for img in \
@@ -226,6 +239,7 @@ if [[ "${pull_ec}" -ne 0 ]]; then
 fi
 
 # Overlap Gitea (apply → seed) with Argo CD (bcrypt → proxy → helm).
+progress 35 "Installing Gitea and Argo CD"
 echo "[gitops-lab] Starting Gitea and Argo CD tracks in parallel..."
 (
   set -euo pipefail
@@ -258,13 +272,16 @@ fi
 
 bash scripts/map-cluster-dns.sh
 
+progress 75 "Registering Application"
 echo "[gitops-lab] Registering repo + Application..."
 kubectl apply -f manifests/application.yml
 
+progress 80 "Configuring webhook"
 echo "[gitops-lab] Configuring Gitea → Argo CD webhook..."
 bash scripts/configure-webhook.sh
 
 # Wait until Argo has synced once (Service selector bug => no endpoints is expected).
+progress 85 "Waiting for Application sync"
 echo "[gitops-lab] Waiting for Application demo-app to appear and sync..."
 for _ in $(seq 1 45); do
   sync=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
@@ -284,6 +301,7 @@ for _ in $(seq 1 30); do
 done
 kubectl -n gitops-lab rollout status deploy/demo-app --timeout=60s || true
 
+progress 92 "Waiting for Argo CD UI"
 echo "[gitops-lab] Waiting for Argo CD UI at /argocd..."
 host="${K3SLAB_INGRESS_HOST}"
 for _ in $(seq 1 20); do
@@ -296,6 +314,7 @@ done
 
 kubectl config set-context --current --namespace=gitops-lab >/dev/null
 
+progress 98 "Finishing"
 echo "[gitops-lab] Ready."
 echo "[gitops-lab] Argo CD UI: http://${K3SLAB_INGRESS_HOST}/argocd/  (user=${STUDENT_ID} pass=${STUDENT_ID})"
 echo "[gitops-lab] Gitea:      http://${K3SLAB_INGRESS_HOST}/gitea/"

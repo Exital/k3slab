@@ -10,6 +10,7 @@ import (
 	"k3slab/engine"
 	"k3slab/exposure"
 	"k3slab/loghub"
+	"k3slab/progress"
 )
 
 // Catalog is the GET /api/labs response.
@@ -35,6 +36,7 @@ type Manager struct {
 	cluster  *cluster.Manager
 	exposure *exposure.Watcher
 	hub      *loghub.Hub
+	progress *progress.Hub
 
 	bootMu         sync.Mutex
 	bootRootCtx    context.Context
@@ -50,9 +52,9 @@ type Manager struct {
 }
 
 // NewManager resolves config, loads the initial engine, and returns a Manager.
-func NewManager(hub *loghub.Hub, clusterMgr *cluster.Manager, watcher *exposure.Watcher) (*Manager, error) {
+func NewManager(hub *loghub.Hub, clusterMgr *cluster.Manager, watcher *exposure.Watcher, progressHub *progress.Hub) (*Manager, error) {
 	labsRoot, activeID := ResolveConfig()
-	eng, err := LoadEngine(labsRoot, activeID, hub)
+	eng, err := LoadEngine(labsRoot, activeID, hub, progressHub)
 	if err != nil {
 		return nil, err
 	}
@@ -63,6 +65,7 @@ func NewManager(hub *loghub.Hub, clusterMgr *cluster.Manager, watcher *exposure.
 		cluster:    clusterMgr,
 		exposure:   watcher,
 		hub:        hub,
+		progress:   progressHub,
 		bootStatus: BootstrapIdle,
 	}, nil
 }
@@ -203,7 +206,7 @@ func (m *Manager) SelectLab(ctx context.Context, id string) (WorkshopState, erro
 	}
 	m.exposure.Sync()
 
-	eng, err := LoadEngine(m.labsRoot, id, m.hub)
+	eng, err := LoadEngine(m.labsRoot, id, m.hub, m.progress)
 	if err != nil {
 		m.mu.Unlock()
 		return WorkshopState{}, err

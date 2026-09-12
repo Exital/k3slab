@@ -196,6 +196,22 @@ export function exposedStreamUrl(): string {
   return "/api/stream/exposed";
 }
 
+export type SetupProgress = {
+  pct: number;
+  message: string;
+  active: boolean;
+};
+
+export async function getProgress(): Promise<SetupProgress> {
+  const res = await fetch("/api/progress");
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export function progressStreamUrl(): string {
+  return "/api/stream/progress";
+}
+
 export const LAST_LAB_STORAGE_KEY = "k3slab:lastLab";
 
 export function needsLabSelection(catalog: LabCatalog, workshop: WorkshopState | null): boolean {
