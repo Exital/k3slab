@@ -5,10 +5,17 @@ cd "$(dirname "$0")/.."
 
 export K3SLAB_INGRESS_HOST="${K3SLAB_INGRESS_HOST:-localhost}"
 
-echo "[deployment-basics] Installing ingress-nginx for this lab..."
-helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx >/dev/null 2>&1 || true
-helm repo update ingress-nginx >/dev/null 2>&1 || true
-helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+INGRESS_NGINX_CHART_VERSION="${INGRESS_NGINX_CHART_VERSION:-4.12.1}"
+# Must match chart appVersion / controller.image.tag for ${INGRESS_NGINX_CHART_VERSION}.
+INGRESS_NGINX_IMAGE="${INGRESS_NGINX_IMAGE:-registry.k8s.io/ingress-nginx/controller:v1.12.1}"
+
+echo "[deployment-basics] Pre-pulling ingress-nginx controller ${INGRESS_NGINX_IMAGE}..."
+k3s ctr images pull "${INGRESS_NGINX_IMAGE}"
+
+echo "[deployment-basics] Installing ingress-nginx (Helm ${INGRESS_NGINX_CHART_VERSION})..."
+helm upgrade --install ingress-nginx ingress-nginx \
+  --repo https://kubernetes.github.io/ingress-nginx \
+  --version "${INGRESS_NGINX_CHART_VERSION}" \
   --namespace ingress-nginx --create-namespace \
   --wait --timeout 10m \
   --set controller.replicaCount=1 \

@@ -14,11 +14,24 @@ for _ in $(seq 1 60); do
 done
 kubectl -n platform-lab get sa default >/dev/null
 
-# Pre-pull chart images so Helm install is not racing Docker Hub on cold CI runners.
-# After earlier labs wipe cluster state, these pulls are the slow path on GitHub Actions.
-echo "[platform-lab] Pre-pulling nginx and busybox images..."
-k3s ctr images pull docker.io/library/nginx:1.27-alpine
-k3s ctr images pull docker.io/library/busybox:1.36
+# Pre-pull chart/job images so Helm install and RBAC job are not racing registries on cold CI.
+echo "[platform-lab] Pre-pulling nginx, busybox, and bitnami/kubectl in parallel..."
+pull_pids=()
+for img in \
+  docker.io/library/nginx:1.27-alpine \
+  docker.io/library/busybox:1.36 \
+  docker.io/bitnami/kubectl:1.31; do
+  k3s ctr images pull "${img}" &
+  pull_pids+=("$!")
+done
+pull_ec=0
+for pid in "${pull_pids[@]}"; do
+  wait "${pid}" || pull_ec=1
+done
+if [[ "${pull_ec}" -ne 0 ]]; then
+  echo "[platform-lab] One or more image pulls failed" >&2
+  exit 1
+fi
 
 kubectl apply -f manifests/catalog-bot-rbac.yml
 kubectl apply -f manifests/attacker-pod.yml
