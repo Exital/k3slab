@@ -35,6 +35,18 @@ type Manager struct {
 	cluster  *cluster.Manager
 	exposure *exposure.Watcher
 	hub      *loghub.Hub
+
+	bootMu         sync.Mutex
+	bootRootCtx    context.Context
+	bootRootCancel context.CancelFunc
+	bootCancel     context.CancelFunc
+	bootGen        uint64
+	bootRunning    bool
+	bootStatus     BootstrapStatus
+	bootErr        string
+	bootLastErr    error
+	bootLastLogs   string
+	bootDone       chan struct{}
 }
 
 // NewManager resolves config, loads the initial engine, and returns a Manager.
@@ -45,12 +57,13 @@ func NewManager(hub *loghub.Hub, clusterMgr *cluster.Manager, watcher *exposure.
 		return nil, err
 	}
 	return &Manager{
-		labsRoot: labsRoot,
-		activeID: activeID,
-		eng:      eng,
-		cluster:  clusterMgr,
-		exposure: watcher,
-		hub:      hub,
+		labsRoot:   labsRoot,
+		activeID:   activeID,
+		eng:        eng,
+		cluster:    clusterMgr,
+		exposure:   watcher,
+		hub:        hub,
+		bootStatus: BootstrapIdle,
 	}, nil
 }
 
@@ -148,9 +161,9 @@ func (m *Manager) SelectLab(ctx context.Context, id string) (WorkshopState, erro
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.cluster.IsResetting() {
+		m.mu.Unlock()
 		return WorkshopState{}, cluster.ErrAlreadyResetting
 	}
 
@@ -158,32 +171,41 @@ func (m *Manager) SelectLab(ctx context.Context, id string) (WorkshopState, erro
 
 	if sameLab {
 		if err := RenderLabManifests(m.labsRoot, id); err != nil {
+			m.mu.Unlock()
 			return WorkshopState{}, err
 		}
 		if err := m.eng.Restart(); err != nil {
+			m.mu.Unlock()
 			return WorkshopState{}, err
 		}
-		return WorkshopState{
+		state := WorkshopState{
 			Snapshot: m.eng.Snapshot(),
 			LabID:    m.activeID,
 			LabsRoot: m.labsRoot,
-		}, nil
+		}
+		m.mu.Unlock()
+		m.RequestBootstrap()
+		return state, nil
 	}
 
 	m.exposure.Clear()
 	if err := WriteClusterProfile(m.labsRoot, id); err != nil {
+		m.mu.Unlock()
 		return WorkshopState{}, err
 	}
 	if err := RenderLabManifests(m.labsRoot, id); err != nil {
+		m.mu.Unlock()
 		return WorkshopState{}, err
 	}
 	if err := m.cluster.Reset(ctx); err != nil {
+		m.mu.Unlock()
 		return WorkshopState{}, err
 	}
 	m.exposure.Sync()
 
 	eng, err := LoadEngine(m.labsRoot, id, m.hub)
 	if err != nil {
+		m.mu.Unlock()
 		return WorkshopState{}, err
 	}
 	m.eng = eng
@@ -191,60 +213,75 @@ func (m *Manager) SelectLab(ctx context.Context, id string) (WorkshopState, erro
 	_ = PersistActiveLab(id)
 	_ = os.Setenv("K3SLAB_TERMINAL_CWD", eng.LabRoot())
 
-	return WorkshopState{
+	state := WorkshopState{
 		Snapshot: m.eng.Snapshot(),
 		LabID:    m.activeID,
 		LabsRoot: m.labsRoot,
-	}, nil
+	}
+	m.mu.Unlock()
+	m.RequestBootstrap()
+	return state, nil
 }
 
 // RestartWorkshop resets in-memory progress for the active lab.
 func (m *Manager) RestartWorkshop() (WorkshopState, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if err := m.eng.Restart(); err != nil {
+		m.mu.Unlock()
 		return WorkshopState{}, err
 	}
-	return WorkshopState{
+	state := WorkshopState{
 		Snapshot: m.eng.Snapshot(),
 		LabID:    m.activeID,
 		LabsRoot: m.labsRoot,
-	}, nil
+	}
+	m.mu.Unlock()
+	m.RequestBootstrap()
+	return state, nil
 }
 
 // RestartLab resets the cluster and workshop progress for the active lab.
 func (m *Manager) RestartLab(ctx context.Context) (WorkshopState, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.cluster.IsResetting() {
+		m.mu.Unlock()
 		return WorkshopState{}, cluster.ErrAlreadyResetting
 	}
 	if m.activeID == "" {
-		return WorkshopState{
+		state := WorkshopState{
 			Snapshot: m.eng.Snapshot(),
 			LabID:    m.activeID,
 			LabsRoot: m.labsRoot,
-		}, nil
+		}
+		m.mu.Unlock()
+		return state, nil
 	}
 
 	m.exposure.Clear()
 	if err := WriteClusterProfile(m.labsRoot, m.activeID); err != nil {
+		m.mu.Unlock()
 		return WorkshopState{}, err
 	}
 	if err := RenderLabManifests(m.labsRoot, m.activeID); err != nil {
+		m.mu.Unlock()
 		return WorkshopState{}, err
 	}
 	if err := m.cluster.Reset(ctx); err != nil {
+		m.mu.Unlock()
 		return WorkshopState{}, err
 	}
 	m.exposure.Sync()
 	if err := m.eng.Restart(); err != nil {
+		m.mu.Unlock()
 		return WorkshopState{}, err
 	}
-	return WorkshopState{
+	state := WorkshopState{
 		Snapshot: m.eng.Snapshot(),
 		LabID:    m.activeID,
 		LabsRoot: m.labsRoot,
-	}, nil
+	}
+	m.mu.Unlock()
+	m.RequestBootstrap()
+	return state, nil
 }

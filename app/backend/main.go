@@ -9,9 +9,9 @@ import (
 
 	"k3slab/cluster"
 	"k3slab/exposure"
+	"k3slab/labs"
 	"k3slab/labtest"
 	"k3slab/loghub"
-	"k3slab/labs"
 	"k3slab/server"
 )
 
@@ -57,6 +57,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	labMgr.StartEagerBootstrap()
 
 	if root := labMgr.ActiveLabRoot(); root != "" {
 		_ = os.Setenv("K3SLAB_TERMINAL_CWD", root)

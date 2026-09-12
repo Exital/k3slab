@@ -95,6 +95,8 @@ export const LAB_RESTART_FAILED_MSG =
 
 export type LabStatus = {
   cluster: "ready" | "resetting" | "unavailable";
+  bootstrap?: "idle" | "running" | "failed";
+  bootstrapError?: string;
 };
 
 export async function getLabStatus(): Promise<LabStatus> {
@@ -107,7 +109,7 @@ export async function waitForLabReady(timeoutMs = 120_000): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const status = await getLabStatus();
-    if (status.cluster === "ready") return;
+    if (status.cluster === "ready" && status.bootstrap !== "running") return;
     if (status.cluster === "unavailable") {
       throw new Error(LAB_RESTART_FAILED_MSG);
     }

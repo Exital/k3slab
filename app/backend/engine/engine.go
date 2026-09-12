@@ -70,33 +70,33 @@ func (e *Engine) kubeEnv() []string {
 
 // Snapshot is API-safe workshop state.
 type Snapshot struct {
-	Name                  string       `json:"name"`
-	Error                 string       `json:"error,omitempty"`
-	TotalSteps            int          `json:"totalSteps"`
-	CurrentStepIndex      int          `json:"currentStepIndex"`
-	TotalQuestions        int          `json:"totalQuestions"`
-	CurrentQuestionNumber int          `json:"currentQuestionNumber"` // 0 on task or when done; 1-based on active question
-	Done                  bool         `json:"done"`
-	Current               *CurrentStep `json:"current,omitempty"`
-	LastSetupLogs         string               `json:"lastSetupLogs,omitempty"`
-	LastVerifyLogs        string               `json:"lastVerifyLogs,omitempty"`
-	LastTaskLogs          string               `json:"lastTaskLogs,omitempty"`
+	Name                  string                `json:"name"`
+	Error                 string                `json:"error,omitempty"`
+	TotalSteps            int                   `json:"totalSteps"`
+	CurrentStepIndex      int                   `json:"currentStepIndex"`
+	TotalQuestions        int                   `json:"totalQuestions"`
+	CurrentQuestionNumber int                   `json:"currentQuestionNumber"` // 0 on task or when done; 1-based on active question
+	Done                  bool                  `json:"done"`
+	Current               *CurrentStep          `json:"current,omitempty"`
+	LastSetupLogs         string                `json:"lastSetupLogs,omitempty"`
+	LastVerifyLogs        string                `json:"lastVerifyLogs,omitempty"`
+	LastTaskLogs          string                `json:"lastTaskLogs,omitempty"`
 	SidebarTabs           []workshop.SidebarTab `json:"sidebarTabs,omitempty"`
 }
 
 type CurrentStep struct {
-	ID                 string               `json:"id"`
-	Type               workshop.StepType    `json:"type"`
-	Title              string               `json:"title"`
-	Description        string               `json:"description,omitempty"`
-	AnswerType         workshop.AnswerType  `json:"answer_type,omitempty"`
-	Options            []string             `json:"options,omitempty"`
-	IncorrectMessage   string               `json:"incorrect_message,omitempty"`
-	CorrectMessage     string               `json:"correct_message,omitempty"`
-	Hints                 []string             `json:"hints,omitempty"`
-	PollIntervalSeconds   int                  `json:"poll_interval_seconds,omitempty"`
-	SetupDone             bool                 `json:"setupDone"`
-	Completed             bool                 `json:"completed"`
+	ID                  string              `json:"id"`
+	Type                workshop.StepType   `json:"type"`
+	Title               string              `json:"title"`
+	Description         string              `json:"description,omitempty"`
+	AnswerType          workshop.AnswerType `json:"answer_type,omitempty"`
+	Options             []string            `json:"options,omitempty"`
+	IncorrectMessage    string              `json:"incorrect_message,omitempty"`
+	CorrectMessage      string              `json:"correct_message,omitempty"`
+	Hints               []string            `json:"hints,omitempty"`
+	PollIntervalSeconds int                 `json:"poll_interval_seconds,omitempty"`
+	SetupDone           bool                `json:"setupDone"`
+	Completed           bool                `json:"completed"`
 }
 
 func (e *Engine) Snapshot() Snapshot {
@@ -129,14 +129,14 @@ func (e *Engine) Snapshot() Snapshot {
 	}
 	st := e.w.Steps[e.current]
 	snap.Current = &CurrentStep{
-		ID:                st.ID,
-		Type:              st.Type,
-		Title:             st.Title,
-		Description:       st.Description,
-		AnswerType:        st.AnswerType,
-		Options:           append([]string(nil), st.Options...),
-		IncorrectMessage:  st.IncorrectMessage,
-		CorrectMessage:    st.CorrectMessage,
+		ID:                  st.ID,
+		Type:                st.Type,
+		Title:               st.Title,
+		Description:         st.Description,
+		AnswerType:          st.AnswerType,
+		Options:             append([]string(nil), st.Options...),
+		IncorrectMessage:    st.IncorrectMessage,
+		CorrectMessage:      st.CorrectMessage,
 		Hints:               append([]string(nil), st.Hints...),
 		PollIntervalSeconds: st.PollIntervalSeconds,
 		SetupDone:           e.setupDone[e.current],
@@ -204,6 +204,43 @@ func (e *Engine) currentStep() (*workshop.Step, error) {
 	}
 	st := e.w.Steps[e.current]
 	return &st, nil
+}
+
+// AutoAction is the next automatic landing action for eager bootstrap / UI auto-run.
+type AutoAction string
+
+const (
+	AutoNone  AutoAction = ""
+	AutoTask  AutoAction = "task"
+	AutoSetup AutoAction = "setup"
+)
+
+// PeekAutoAction reports whether the current step should be advanced by RunTask or RunQuestionSetup.
+// Holds the engine lock only briefly so callers can decide before a long shell run.
+func (e *Engine) PeekAutoAction() AutoAction {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.loadErr != nil || e.w == nil {
+		return AutoNone
+	}
+	if e.current < 0 || e.current >= len(e.w.Steps) {
+		return AutoNone
+	}
+	st := e.w.Steps[e.current]
+	switch st.Type {
+	case workshop.StepTask:
+		if e.completed[e.current] {
+			return AutoNone
+		}
+		return AutoTask
+	case workshop.StepQuestion:
+		if e.setupDone[e.current] {
+			return AutoNone
+		}
+		return AutoSetup
+	default:
+		return AutoNone
+	}
 }
 
 // RunTask runs the current task step shell command; advances on success.

@@ -53,3 +53,30 @@ func TestRunQuestionSetupBackgroundCommand(t *testing.T) {
 	}
 	t.Fatalf("background setup command did not complete")
 }
+
+func TestPeekAutoAction(t *testing.T) {
+	labRoot := t.TempDir()
+	w := &workshop.Workshop{
+		Name: "test",
+		Steps: []workshop.Step{
+			{ID: "t1", Type: workshop.StepTask, Title: "T", Run: "true"},
+			{ID: "q1", Type: workshop.StepQuestion, Title: "Q", AnswerType: workshop.AnswerText, Verify: "true"},
+		},
+	}
+	eng := New(w, labRoot, loghub.New())
+	if got := eng.PeekAutoAction(); got != AutoTask {
+		t.Fatalf("got %q want task", got)
+	}
+	if _, err := eng.RunTask(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := eng.PeekAutoAction(); got != AutoSetup {
+		t.Fatalf("got %q want setup", got)
+	}
+	if _, err := eng.RunQuestionSetup(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := eng.PeekAutoAction(); got != AutoNone {
+		t.Fatalf("got %q want none", got)
+	}
+}

@@ -176,12 +176,16 @@ export default function App({ theme, setTheme }: AppProps) {
   const [labSwitcherOpen, setLabSwitcherOpen] = useState(false);
   const [labSwitchMessage, setLabSwitchMessage] = useState("Restarting lab…");
   const [clusterStatus, setClusterStatus] = useState<LabStatus["cluster"] | null>(() => readStoredClusterStatus());
+  const [bootstrapStatus, setBootstrapStatus] = useState<LabStatus["bootstrap"] | null>(null);
   const clusterReady = clusterStatus === "ready";
+  const bootstrapRunning = bootstrapStatus === "running";
+  const bootstrapFailed = bootstrapStatus === "failed";
   const exposedEndpoints = useExposedEndpoints();
   const { detached, detach, dock, popupBlocked } = useTerminalDetach();
   const { reconnectTerminal } = useTerminalSession();
   const autoKey = useRef<string>("");
   const prevLabIdRef = useRef<string | undefined>(undefined);
+  const prevBootstrapRef = useRef<LabStatus["bootstrap"] | null>(null);
   const checkInFlight = useRef(false);
   const observePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -200,15 +204,22 @@ export default function App({ theme, setTheme }: AppProps) {
   const refresh = useCallback(async () => {
     setVerifyOutcome("idle");
     try {
-      const [cat, s, labStatus] = await Promise.all([
-        getLabs(),
-        getWorkshop(),
-        getLabStatus().catch(() => null),
-      ]);
+      const labStatus = await getLabStatus().catch(() => null);
+      if (labStatus) {
+        updateClusterStatus(labStatus.cluster);
+        setBootstrapStatus(labStatus.bootstrap ?? "idle");
+      }
+      // Avoid blocking on workshop snapshot while eager bootstrap holds the engine lock.
+      if (labStatus?.bootstrap === "running") {
+        const cat = await getLabs();
+        setCatalog(cat);
+        setLoadErr(null);
+        return { cat, s: null as WorkshopState | null };
+      }
+      const [cat, s] = await Promise.all([getLabs(), getWorkshop()]);
       setCatalog(cat);
       setState(s);
       setLoadErr(null);
-      if (labStatus) updateClusterStatus(labStatus.cluster);
       return { cat, s };
     } catch (e) {
       setLoadErr(String(e));
@@ -301,12 +312,22 @@ export default function App({ theme, setTheme }: AppProps) {
         const status = await getLabStatus();
         if (closed) return;
         updateClusterStatus(status.cluster);
+        const boot = status.bootstrap ?? "idle";
+        setBootstrapStatus(boot);
+        if (status.bootstrapError && boot === "failed") {
+          setActionErr(status.bootstrapError);
+        }
         if (status.cluster === "resetting") {
           setLabRestarting(true);
           return;
         }
         if (status.cluster === "ready" && labRestarting && !labRestartFailed) {
           setLabRestarting(false);
+          await refresh();
+        }
+        const prevBoot = prevBootstrapRef.current;
+        prevBootstrapRef.current = boot;
+        if (prevBoot === "running" && boot !== "running" && status.cluster === "ready") {
           await refresh();
         }
       } catch {
@@ -324,7 +345,7 @@ export default function App({ theme, setTheme }: AppProps) {
   }, [labRestartFailed, labRestarting, refresh, updateClusterStatus]);
 
   useEffect(() => {
-    if (labRestarting || !clusterReady || !state || state.error || state.done || !state.current) return;
+    if (labRestarting || bootstrapRunning || !clusterReady || !state || state.error || state.done || !state.current) return;
 
     const key = `${state.currentStepIndex}:${state.current.id}:${state.current.type}`;
     const run = async () => {
@@ -365,7 +386,7 @@ export default function App({ theme, setTheme }: AppProps) {
     };
 
     void run();
-  }, [clusterReady, labRestarting, state]);
+  }, [bootstrapRunning, clusterReady, labRestarting, state]);
 
   useEffect(() => {
     if (state?.current?.type === "question") {
@@ -389,16 +410,16 @@ export default function App({ theme, setTheme }: AppProps) {
 
   const canSubmit = useMemo(() => {
     if (!current || current.type !== "question") return false;
-    if (!clusterReady) return false;
+    if (!clusterReady || bootstrapRunning) return false;
     if (current.answer_type === "observe") return false;
     if (!current.setupDone || busy || awaitingNext) return false;
     if (current.answer_type === "text") return answer.trim().length > 0;
     return answer.length > 0;
-  }, [answer, awaitingNext, busy, clusterReady, current]);
+  }, [answer, awaitingNext, bootstrapRunning, busy, clusterReady, current]);
 
   const runObserveCheck = useCallback(async () => {
     if (!current || current.type !== "question" || current.answer_type !== "observe") return;
-    if (!clusterReady || !current.setupDone || current.completed || checkInFlight.current || busy) return;
+    if (!clusterReady || bootstrapRunning || !current.setupDone || current.completed || checkInFlight.current || busy) return;
     checkInFlight.current = true;
     try {
       const r = await checkQuestion();
@@ -415,7 +436,7 @@ export default function App({ theme, setTheme }: AppProps) {
     } finally {
       checkInFlight.current = false;
     }
-  }, [busy, clusterReady, current]);
+  }, [bootstrapRunning, busy, clusterReady, current]);
 
   useEffect(() => {
     if (observePollRef.current) {
@@ -424,6 +445,7 @@ export default function App({ theme, setTheme }: AppProps) {
     }
     if (
       labRestarting ||
+      bootstrapRunning ||
       !clusterReady ||
       !current ||
       current.type !== "question" ||
@@ -447,6 +469,7 @@ export default function App({ theme, setTheme }: AppProps) {
   }, [
     current,
     clusterReady,
+    bootstrapRunning,
     labRestarting,
     runObserveCheck,
     state?.currentStepIndex,
@@ -560,7 +583,7 @@ export default function App({ theme, setTheme }: AppProps) {
   const correctMessageText = current?.correct_message?.trim() ?? "";
   const showIncorrectPanel = hadFailure && !incorrectPanelDismissed;
   const showCorrectPanel = awaitingNext && correctMessageText.length > 0 && !correctPanelDismissed;
-  const answerDisabled = busy || awaitingNext || !clusterReady;
+  const answerDisabled = busy || awaitingNext || !clusterReady || bootstrapRunning;
 
   const progressMeta = useMemo(() => {
     if (!state || state.error) {
@@ -571,13 +594,13 @@ export default function App({ theme, setTheme }: AppProps) {
     }
     const tq = state.totalQuestions ?? 0;
     const cq = state.currentQuestionNumber ?? 0;
-    if (state.current?.type === "task") {
+    if (bootstrapRunning || state.current?.type === "task") {
       return { line1: "Starting", line2: "Preparing workshop", pct: 5 };
     }
     if (tq <= 0) return { line1: "—", line2: state.name, pct: 0 };
     const pct = Math.min(100, Math.round((cq / tq) * 100));
     return { line1: `Question ${cq} / ${tq}`, line2: state.name, pct };
-  }, [state]);
+  }, [bootstrapRunning, state]);
 
   const markdownTab = useMemo(() => {
     if (sidebarView === "workshop") return undefined;
@@ -593,11 +616,13 @@ export default function App({ theme, setTheme }: AppProps) {
   }, [state?.sidebarTabs, sidebarView]);
 
   const overlayLabel = useMemo(() => {
+    if (bootstrapRunning) return "Preparing environment…";
+    if (bootstrapFailed) return null;
     if (!busy || !current) return null;
     if (current.type === "task") return "Preparing environment…";
     if (current.type === "question" && !current.setupDone) return "Setting up…";
     return null;
-  }, [busy, current]);
+  }, [bootstrapFailed, bootstrapRunning, busy, current]);
 
   const typeBadge = current?.type === "task" ? "Setup" : current?.type === "question" ? "Task overview" : "";
 

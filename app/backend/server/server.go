@@ -147,7 +147,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLabStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]string{"cluster": s.cluster.Status(r.Context())})
+	bootstrap, bootErr := s.labMgr.BootstrapStatusValue()
+	resp := map[string]string{
+		"cluster":   s.cluster.Status(r.Context()),
+		"bootstrap": string(bootstrap),
+	}
+	if bootErr != "" {
+		resp["bootstrapError"] = bootErr
+	}
+	writeJSON(w, resp)
 }
 
 func (s *Server) handleLabs(w http.ResponseWriter, r *http.Request) {
@@ -238,19 +246,13 @@ func (s *Server) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 	if !s.requireClusterReady(w) {
 		return
 	}
-	ctx := r.Context()
-	var logs string
-	var err error
-	var snap labs.WorkshopState
-	s.labMgr.WithEngine(func(eng *engine.Engine, labID, labsRoot string) {
-		logs, err = eng.RunTask(ctx)
-		if err == nil {
-			snap = s.labMgr.WorkshopSnap(eng, labID, labsRoot)
-		}
-	})
-	if err != nil {
+	logs, snap, err := s.labMgr.EnsureAutoSteps(r.Context())
+	if err != nil && !errors.Is(err, labs.ErrBootstrapSuperseded) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
+	}
+	if errors.Is(err, labs.ErrBootstrapSuperseded) {
+		snap = s.labMgr.WorkshopState()
 	}
 	writeJSON(w, map[string]any{"ok": true, "logs": logs, "state": snap})
 }
@@ -259,19 +261,13 @@ func (s *Server) handleQuestionSetup(w http.ResponseWriter, r *http.Request) {
 	if !s.requireClusterReady(w) {
 		return
 	}
-	ctx := r.Context()
-	var logs string
-	var err error
-	var snap labs.WorkshopState
-	s.labMgr.WithEngine(func(eng *engine.Engine, labID, labsRoot string) {
-		logs, err = eng.RunQuestionSetup(ctx)
-		if err == nil {
-			snap = s.labMgr.WorkshopSnap(eng, labID, labsRoot)
-		}
-	})
-	if err != nil {
+	logs, snap, err := s.labMgr.EnsureAutoSteps(r.Context())
+	if err != nil && !errors.Is(err, labs.ErrBootstrapSuperseded) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
+	}
+	if errors.Is(err, labs.ErrBootstrapSuperseded) {
+		snap = s.labMgr.WorkshopState()
 	}
 	writeJSON(w, map[string]any{"ok": true, "logs": logs, "state": snap})
 }
