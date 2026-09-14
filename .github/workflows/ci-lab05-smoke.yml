@@ -1,0 +1,47 @@
+# Temporary fast feedback loop for lab 05 only. Remove after CI is stable.
+name: Lab 05 smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "lab/05-gitops-argocd/**"
+      - ".github/workflows/ci-lab05-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lab05-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build test image
+        run: docker build -f docker/Dockerfile --target tests -t k3slab-tests .
+
+      - name: Run lab 05 e2e
+        run: |
+          mkdir -p reports/lab05
+          docker run --rm --privileged --cgroupns=host \
+            -p 80:80 \
+            -v "${{ github.workspace }}/lab:/src/lab:ro" \
+            -e K3SLAB_TEST_ONLY=lab-e2e \
+            -e K3SLAB_TEST_LAB=05-gitops-argocd \
+            -e K3SLAB_TEST_REPORT_DIR=/reports \
+            -e GITHUB_ACTIONS=true \
+            -v "${{ github.workspace }}/reports/lab05:/reports" \
+            k3slab-tests
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab05-smoke-reports
+          path: reports/lab05/
+          if-no-files-found: ignore

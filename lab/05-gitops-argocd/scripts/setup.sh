@@ -26,7 +26,6 @@ bcrypt_password() {
   local pass="$1"
   local hash=""
 
-  # Fast path: glibc/libxcrypt via Python (available in the lab Ubuntu image).
   hash="$(
     PASSWORD="${pass}" python3 - <<'PY' 2>/dev/null || true
 import crypt
@@ -35,7 +34,6 @@ import sys
 
 pw = os.environ["PASSWORD"]
 try:
-    # rounds is 2**cost; 1024 => $2b$10$ (Argo CD default cost).
     h = crypt.crypt(pw, crypt.mksalt(crypt.METHOD_BLOWFISH, rounds=1024))
 except Exception:
     sys.exit(1)
@@ -82,7 +80,6 @@ apply_gitea() {
   kubectl apply -f "${tmp_gitea}"
   rm -f "${tmp_gitea}"
 
-  # Traefik CRDs can lag briefly after a fresh cluster / lab reset.
   for _ in $(seq 1 60); do
     if kubectl get crd middlewares.traefik.io >/dev/null 2>&1; then
       break
@@ -104,12 +101,10 @@ apply_gitea() {
   kubectl apply -f "${tmp_gitea_ing}"
   rm -f "${tmp_gitea_ing}"
 
-  # Prefer in-pod readiness (exec nc) — then confirm ClusterIP API for seeding.
-  if ! kubectl -n gitops-lab rollout status deploy/gitea --timeout=900s; then
+  if ! kubectl -n gitops-lab rollout status deploy/gitea --timeout=480s; then
     echo "[gitops-lab] Gitea rollout failed; diagnostics:" >&2
     kubectl -n gitops-lab get pods -l app=gitea -o wide >&2 || true
     kubectl -n gitops-lab describe deploy/gitea >&2 || true
-    kubectl -n gitops-lab describe pod -l app=gitea >&2 || true
     kubectl -n gitops-lab logs -l app=gitea --tail=80 >&2 || true
     return 1
   fi
@@ -129,6 +124,7 @@ apply_webhook_proxy() {
     manifests/webhook-proxy.yml >"${tmp_proxy}"
   kubectl apply -f "${tmp_proxy}"
   rm -f "${tmp_proxy}"
+  kubectl -n gitops-lab rollout status deploy/gitops-webhook-proxy --timeout=180s
 }
 
 install_argocd() {
@@ -153,7 +149,6 @@ configs:
     server.basehref: "/argocd"
   cm:
     accounts.${STUDENT_ID}: login
-    # Backup only — Gitea push webhook triggers immediate refresh (see configure-webhook.sh).
     timeout.reconciliation: 180s
   rbac:
     policy.csv: |
@@ -175,27 +170,22 @@ server:
 EOF
 
   echo "[gitops-lab] Installing Argo CD (Helm ${ARGOCD_CHART_VERSION})..."
-  # Do not --wait on Ready: after multi-lab resets, kubelet→pod probes are flaky even
-  # when containers are healthy (host/ClusterIP path). Wait for Running instead.
   helm upgrade --install argocd argo-cd \
     --repo https://argoproj.github.io/argo-helm \
     --namespace argocd \
     --version "${ARGOCD_CHART_VERSION}" \
     --values "${VALUES_FILE}" \
-    --timeout 15m
+    --timeout 10m
   rm -f "${VALUES_FILE}"
 
-  # Require the components the Application controller talks to — a generic
-  # "3 Running pods" check can pass before repo-server is up (CI flake:
-  # ComparisonError lookup argocd-repo-server: i/o timeout).
   echo "[gitops-lab] Waiting for Argo CD core components to be Running..."
   ok=0
-  for _ in $(seq 1 180); do
+  for _ in $(seq 1 90); do
     rs_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-repo-server --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
     srv_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-server --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
     ctrl_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-application-controller --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
     redis_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-redis --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
-    rs_ep="$(kubectl -n argocd get endpoints argocd-repo-server -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)"
+    rs_ep="$(kubectl -n argocd get endpoints argocd-repo-server -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
     if [[ "${rs_phase}" == "Running" && "${srv_phase}" == "Running" && "${ctrl_phase}" == "Running" && "${redis_phase}" == "Running" && -n "${rs_ep}" ]]; then
       ok=1
       break
@@ -203,16 +193,10 @@ EOF
     sleep 2
   done
   if [[ "${ok}" != "1" ]]; then
-    echo "[gitops-lab] Argo CD core components not Running in time (repo=${rs_phase:-?} server=${srv_phase:-?} ctrl=${ctrl_phase:-?} redis=${redis_phase:-?} ep=${rs_ep:-none})" >&2
+    echo "[gitops-lab] Argo CD core components not Running in time" >&2
     kubectl -n argocd get pods -o wide >&2 || true
-    kubectl -n argocd get endpoints argocd-repo-server -o wide >&2 || true
     return 1
   fi
-
-  # Give CoreDNS a moment after the Argo pod storm.
-  echo "[gitops-lab] Waiting for CoreDNS to be Running..."
-  kubectl -n kube-system wait --for=condition=Ready pod -l k8s-app=kube-dns --timeout=120s >/dev/null 2>&1 || true
-  sleep 3
 
   tmp_argocd_ing="$(mktemp)"
   if [[ -f manifests/argocd-ingress.yml.template ]]; then
@@ -227,7 +211,6 @@ EOF
   kubectl apply -f "${tmp_argocd_ing}"
   rm -f "${tmp_argocd_ing}"
 
-  # Helm values already set the student account; patch only as a merge safety net (no restart).
   kubectl -n argocd patch configmap argocd-cm --type merge \
     -p "{\"data\":{\"accounts.${STUDENT_ID}\":\"login\"}}" >/dev/null
   patch_json="$(jq -n --arg u "${STUDENT_ID}" --arg p "${bcrypt_hash}" \
@@ -238,33 +221,69 @@ EOF
   kubectl -n argocd patch configmap argocd-rbac-cm --type merge -p "${rbac_json}" >/dev/null
 }
 
-# Point application-controller at repo-server via pod IP (ClusterIP often blackholes on CI nested K3s).
-pin_argocd_repo_server() {
-  local rs_ip
+# Nested K3s on CI: CoreDNS/ClusterIP are flaky — use pod IPs once, restart affected pods once.
+wire_argocd_pod_network() {
+  local gitea_ip rs_ip
+  gitea_ip="$(kubectl -n gitops-lab get endpoints gitea -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
   rs_ip="$(kubectl -n argocd get endpoints argocd-repo-server -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
-  if [[ -z "${rs_ip}" ]]; then
-    echo "[gitops-lab] Warning: no argocd-repo-server endpoint IP" >&2
+  if [[ -z "${gitea_ip}" || -z "${rs_ip}" ]]; then
+    echo "[gitops-lab] Cannot wire Argo pod network (gitea=${gitea_ip:-?} repo-server=${rs_ip:-?})" >&2
     return 1
   fi
-  echo "[gitops-lab] Pinning repo.server to ${rs_ip}:8081 (pod IP; avoid CoreDNS + ClusterIP)..."
+
+  echo "[gitops-lab] Wiring repo-server hostAlias gitea → ${gitea_ip}..."
+  kubectl -n argocd patch deploy argocd-repo-server --type strategic --patch-file=/dev/stdin <<EOF
+spec:
+  template:
+    spec:
+      hostAliases:
+        - ip: "${gitea_ip}"
+          hostnames:
+            - gitea.gitops-lab.svc.cluster.local
+EOF
+  kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=180s >/dev/null
+  rs_ip="$(kubectl -n argocd get endpoints argocd-repo-server -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
+
+  echo "[gitops-lab] Pinning repo.server to ${rs_ip}:8081 (pod IP)..."
   kubectl -n argocd patch configmap argocd-cmd-params-cm --type merge \
     -p "{\"data\":{\"repo.server\":\"${rs_ip}:8081\"}}" >/dev/null
+
   if kubectl -n argocd get statefulset argocd-application-controller >/dev/null 2>&1; then
     kubectl -n argocd rollout restart statefulset/argocd-application-controller >/dev/null
-    kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=180s >/dev/null || true
-  elif kubectl -n argocd get deploy argocd-application-controller >/dev/null 2>&1; then
-    kubectl -n argocd rollout restart deploy/argocd-application-controller >/dev/null
-    kubectl -n argocd rollout status deploy/argocd-application-controller --timeout=180s >/dev/null || true
+    kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=180s >/dev/null
   fi
-  local _ ctrl_phase
-  for _ in $(seq 1 60); do
-    ctrl_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-application-controller --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
-    if [[ "${ctrl_phase}" == "Running" ]]; then
+}
+
+wait_application_sync() {
+  local sync cond
+  for _ in $(seq 1 90); do
+    sync="$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null || true)"
+    if [[ "${sync}" == "Synced" || "${sync}" == "OutOfSync" ]]; then
       return 0
+    fi
+    cond="$(kubectl -n argocd get application demo-app -o jsonpath='{.status.conditions[0].message}' 2>/dev/null || true)"
+    if [[ -n "${cond}" ]]; then
+      echo "[gitops-lab] Application sync pending: ${cond}" >&2
+    fi
+    kubectl -n argocd annotate application demo-app argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
+    sleep 2
+  done
+  return 1
+}
+
+wait_demo_app_running() {
+  local ready running
+  for _ in $(seq 1 90); do
+    if kubectl -n gitops-lab get deploy demo-app >/dev/null 2>&1; then
+      ready="$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
+      running="$(kubectl -n gitops-lab get pods -l app=demo-app --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+      if [[ "${ready:-0}" -ge 1 || "${running:-0}" -ge 1 ]]; then
+        return 0
+      fi
     fi
     sleep 2
   done
-  return 0
+  return 1
 }
 
 # --- main --------------------------------------------------------------------
@@ -275,7 +294,6 @@ progress() {
   if command -v k3slab-progress >/dev/null 2>&1; then
     k3slab-progress "${pct}" "$@"
   else
-    # Fallback when the helper is not on PATH (local/dev).
     printf '::k3slab-progress::%s::%s\n' "${pct}" "$*"
   fi
 }
@@ -284,7 +302,6 @@ progress 5 "Applying namespaces"
 echo "[gitops-lab] Applying namespaces..."
 kubectl apply -f manifests/00-namespace.yml
 
-# Namespace controller creates the default SA asynchronously.
 for _ in $(seq 1 60); do
   if kubectl -n gitops-lab get sa default >/dev/null 2>&1; then
     break
@@ -294,7 +311,7 @@ done
 kubectl -n gitops-lab get sa default >/dev/null
 
 progress 15 "Pre-pulling images"
-echo "[gitops-lab] Pre-pulling images in parallel (Gitea, nginx, redis, Argo CD, python)..."
+echo "[gitops-lab] Pre-pulling images in parallel..."
 pull_pids=()
 for img in "${GITEA_IMAGE}" "${NGINX_IMAGE}" "${REDIS_IMAGE}" "${ARGOCD_IMAGE}" "${PYTHON_IMAGE}"; do
   k3s ctr images pull "${img}" &
@@ -309,53 +326,22 @@ if [[ "${pull_ec}" -ne 0 ]]; then
   exit 1
 fi
 
-# Parallel tracks: Gitea (apply + seed) alongside Argo CD install.
-progress 35 "Installing Gitea and Argo CD in parallel"
-gitea_ec=0
-argo_ec=0
-(
-  apply_gitea
-) &
-gitea_pid=$!
+# Serial install: reliable on cold CI (parallel tracks starve Gitea and hang).
+progress 30 "Installing Gitea"
+apply_gitea
 
-(
-  echo "[gitops-lab] Generating student password hash..."
-  BCRYPT_HASH="$(bcrypt_password "${STUDENT_ID}")"
-  apply_webhook_proxy
-  kubectl -n gitops-lab rollout status deploy/gitops-webhook-proxy --timeout=180s &
-  proxy_wait_pid=$!
-  install_argocd "${BCRYPT_HASH}"
-  wait "${proxy_wait_pid}"
-) &
-argo_pid=$!
+progress 45 "Installing webhook proxy"
+apply_webhook_proxy
 
-wait "${gitea_pid}" || gitea_ec=$?
-wait "${argo_pid}" || argo_ec=$?
-if [[ "${gitea_ec}" -ne 0 || "${argo_ec}" -ne 0 ]]; then
-  echo "[gitops-lab] Parallel setup failed (gitea_ec=${gitea_ec} argo_ec=${argo_ec})" >&2
-  exit 1
-fi
+progress 55 "Installing Argo CD"
+echo "[gitops-lab] Generating student password hash..."
+BCRYPT_HASH="$(bcrypt_password "${STUDENT_ID}")"
+install_argocd "${BCRYPT_HASH}"
+
+progress 65 "Wiring Argo pod network"
+wire_argocd_pod_network
 
 bash scripts/map-cluster-dns.sh
-
-# Repo-server clones via CoreDNS too — pin gitea hostname to pod IP (same CI DNS flake).
-gitea_ip="$(kubectl -n gitops-lab get endpoints gitea -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
-if [[ -n "${gitea_ip}" ]]; then
-  echo "[gitops-lab] Pinning gitea.gitops-lab.svc.cluster.local → ${gitea_ip} on argocd-repo-server..."
-  kubectl -n argocd patch deploy argocd-repo-server --type strategic --patch-file=/dev/stdin <<EOF
-spec:
-  template:
-    spec:
-      hostAliases:
-        - ip: "${gitea_ip}"
-          hostnames:
-            - gitea.gitops-lab.svc.cluster.local
-EOF
-  kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=180s >/dev/null || true
-fi
-
-# After repo-server (re)starts, pin controller to its pod IP (ClusterIP blackholes on CI).
-pin_argocd_repo_server || true
 
 progress 75 "Registering Application"
 echo "[gitops-lab] Registering repo + Application..."
@@ -365,62 +351,27 @@ progress 80 "Configuring webhook"
 echo "[gitops-lab] Configuring Gitea → Argo CD webhook..."
 bash scripts/configure-webhook.sh
 
-# Wait until Argo has synced once (Service selector bug => no endpoints is expected).
 progress 85 "Waiting for Application sync"
 echo "[gitops-lab] Waiting for Application demo-app to appear and sync..."
-for i in $(seq 1 120); do
-  sync=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
-  if [[ "${sync}" == "Synced" || "${sync}" == "OutOfSync" ]]; then
-    break
-  fi
-  # Recover from dial failures — re-pin to current repo-server pod IP (not ClusterIP / CoreDNS).
-  if (( i % 15 == 0 )); then
-    cond="$(kubectl -n argocd get application demo-app -o jsonpath='{.status.conditions[0].message}' 2>/dev/null || true)"
-    if [[ "${cond}" == *repo-server* || "${cond}" == *i/o\ timeout* || "${cond}" == *connection\ error* || "${cond}" == *10.43.* ]]; then
-      echo "[gitops-lab] Application ComparisonError (${cond}); re-pinning repo.server to pod IP..." >&2
-      pin_argocd_repo_server || true
-      sleep 5
-    fi
-    kubectl -n argocd annotate application demo-app argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
-  fi
-  sleep 2
-done
-kubectl -n argocd get application demo-app >/dev/null
+if ! wait_application_sync; then
+  echo "[gitops-lab] Application demo-app never reached Synced/OutOfSync" >&2
+  kubectl -n argocd get application demo-app -o yaml 2>&1 | tail -60 >&2 || true
+  kubectl -n argocd get pods -o wide >&2 || true
+  exit 1
+fi
 
 echo "[gitops-lab] Waiting for demo-app Deployment from Argo sync..."
-ok=0
-for i in $(seq 1 120); do
-  if ! kubectl -n gitops-lab get deploy demo-app >/dev/null 2>&1; then
-    if (( i % 15 == 0 )); then
-      kubectl -n argocd annotate application demo-app argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
-    fi
-    sleep 2
-    continue
-  fi
-  ready="$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
-  running="$(kubectl -n gitops-lab get pods -l app=demo-app --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')"
-  if [[ "${ready:-0}" -ge 1 || "${running:-0}" -ge 1 ]]; then
-    ok=1
-    break
-  fi
-  sleep 2
-done
-if [[ "${ok}" != "1" ]]; then
+if ! wait_demo_app_running; then
   echo "[gitops-lab] demo-app never became Running after Argo sync" >&2
   kubectl -n argocd get application demo-app -o wide >&2 || true
-  kubectl -n argocd get application demo-app -o yaml 2>&1 | tail -80 >&2 || true
-  kubectl -n argocd get pods -o wide >&2 || true
-  kubectl -n argocd get svc,endpoints argocd-repo-server -o wide >&2 || true
-  kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide >&2 || true
   kubectl -n gitops-lab get deploy,pods,svc -o wide >&2 || true
   exit 1
 fi
 kubectl -n gitops-lab rollout status deploy/demo-app --timeout=120s || true
 
 progress 92 "Waiting for Argo CD UI"
-echo "[gitops-lab] Waiting for Argo CD UI at /argocd..."
 host="${K3SLAB_INGRESS_HOST}"
-for _ in $(seq 1 20); do
+for _ in $(seq 1 15); do
   if curl -sf -H "Host: ${host}" "http://127.0.0.1/argocd/" >/dev/null 2>&1 \
     || curl -sf -H "Host: ${host}" "http://127.0.0.1/argocd" >/dev/null 2>&1; then
     break
