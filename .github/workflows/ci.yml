@@ -1,0 +1,164 @@
+# Shared CI: light phases + dynamic per-lab e2e matrix + short lab-switch soak.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  discover-labs:
+    runs-on: ubuntu-latest
+    outputs:
+      labs: ${{ steps.set.outputs.labs }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Discover labs
+        id: set
+        run: |
+          labs="$(find lab -mindepth 2 -maxdepth 2 -name workshop.yml \
+            | sed 's|^lab/||;s|/workshop.yml||' \
+            | sort \
+            | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+          echo "labs=${labs}" >> "${GITHUB_OUTPUT}"
+          echo "Discovered labs: ${labs}"
+
+  build-test-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build test image
+        run: docker build -f docker/Dockerfile --target tests -t k3slab-tests .
+
+      - name: Save image artifact
+        run: docker save k3slab-tests | gzip > /tmp/k3slab-tests.tar.gz
+
+      - name: Upload test image
+        uses: actions/upload-artifact@v4
+        with:
+          name: k3slab-tests-image
+          path: /tmp/k3slab-tests.tar.gz
+          retention-days: 1
+
+  light:
+    needs: [build-test-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download test image
+        uses: actions/download-artifact@v4
+        with:
+          name: k3slab-tests-image
+          path: /tmp
+
+      - name: Load image
+        run: gunzip -c /tmp/k3slab-tests.tar.gz | docker load
+
+      - name: Run light phases
+        run: |
+          mkdir -p reports/light
+          docker run --rm --privileged --cgroupns=host \
+            -v "${{ github.workspace }}/lab:/src/lab:ro" \
+            -e K3SLAB_TEST_ONLY=backend-unit,backend-integration,frontend-build \
+            -e K3SLAB_TEST_REPORT_DIR=/reports \
+            -e GITHUB_ACTIONS=true \
+            -v "${{ github.workspace }}/reports/light:/reports" \
+            k3slab-tests
+
+      - name: Upload light reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-light
+          path: reports/light/
+          if-no-files-found: ignore
+
+  lab-e2e:
+    needs: [discover-labs, build-test-image]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        lab: ${{ fromJson(needs.discover-labs.outputs.labs) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download test image
+        uses: actions/download-artifact@v4
+        with:
+          name: k3slab-tests-image
+          path: /tmp
+
+      - name: Load image
+        run: gunzip -c /tmp/k3slab-tests.tar.gz | docker load
+
+      - name: Run lab e2e (${{ matrix.lab }})
+        run: |
+          mkdir -p "reports/lab-e2e-${{ matrix.lab }}"
+          docker run --rm --privileged --cgroupns=host \
+            -p 80:80 \
+            -v "${{ github.workspace }}/lab:/src/lab:ro" \
+            -e K3SLAB_TEST_ONLY=lab-e2e \
+            -e K3SLAB_TEST_LAB=${{ matrix.lab }} \
+            -e K3SLAB_TEST_REPORT_DIR=/reports \
+            -e GITHUB_ACTIONS=true \
+            -v "${{ github.workspace }}/reports/lab-e2e-${{ matrix.lab }}:/reports" \
+            k3slab-tests
+
+      - name: Upload lab reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-lab-e2e-${{ matrix.lab }}
+          path: reports/lab-e2e-${{ matrix.lab }}/
+          if-no-files-found: ignore
+
+  lab-switch:
+    needs: [build-test-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download test image
+        uses: actions/download-artifact@v4
+        with:
+          name: k3slab-tests-image
+          path: /tmp
+
+      - name: Load image
+        run: gunzip -c /tmp/k3slab-tests.tar.gz | docker load
+
+      - name: Run lab switch soak (01 → 02)
+        run: |
+          mkdir -p reports/lab-switch
+          docker run --rm --privileged --cgroupns=host \
+            -p 80:80 \
+            -v "${{ github.workspace }}/lab:/src/lab:ro" \
+            -e K3SLAB_TEST_ONLY=lab-e2e \
+            -e K3SLAB_TEST_LABS=01-kubectl-basics,02-deployment-basics \
+            -e K3SLAB_TEST_REPORT_DIR=/reports \
+            -e GITHUB_ACTIONS=true \
+            -v "${{ github.workspace }}/reports/lab-switch:/reports" \
+            k3slab-tests
+
+      - name: Upload switch reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-lab-switch
+          path: reports/lab-switch/
+          if-no-files-found: ignore

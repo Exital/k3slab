@@ -10,6 +10,7 @@ export K3SLAB_INTEGRATION_LABS_ROOT="${K3SLAB_INTEGRATION_LABS_ROOT:-/src/lab}"
 : "${K3SLAB_TEST_FAIL_FAST:=1}"
 : "${K3SLAB_TEST_ONLY:=}"
 : "${K3SLAB_TEST_LAB:=}"
+: "${K3SLAB_TEST_LABS:=}"
 : "${K3SLAB_TEST_REPORT_DIR:=}"
 : "${K3SLAB_BIN:=/app/k3slab}"
 : "${LABS_ROOT:=/src/lab}"
@@ -34,7 +35,17 @@ should_run_phase() {
   if [[ -z "${K3SLAB_TEST_ONLY}" ]]; then
     return 0
   fi
-  [[ "${K3SLAB_TEST_ONLY}" == "${name}" ]]
+  local IFS=,
+  local want
+  # shellcheck disable=SC2086
+  for want in ${K3SLAB_TEST_ONLY}; do
+    want="${want#"${want%%[![:space:]]*}"}"
+    want="${want%"${want##*[![:space:]]}"}"
+    if [[ "${want}" == "${name}" ]]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 run_phase() {
@@ -101,7 +112,16 @@ run_frontend_build() {
 }
 
 run_lab_e2e() {
-  local profile_lab="${K3SLAB_TEST_LAB:-${LAB_ID:-01-kubectl-basics}}"
+  local profile_lab=""
+  if [[ -n "${K3SLAB_TEST_LAB}" ]]; then
+    profile_lab="${K3SLAB_TEST_LAB}"
+  elif [[ -n "${K3SLAB_TEST_LABS}" ]]; then
+    profile_lab="${K3SLAB_TEST_LABS%%,*}"
+    profile_lab="${profile_lab#"${profile_lab%%[![:space:]]*}"}"
+    profile_lab="${profile_lab%"${profile_lab##*[![:space:]]}"}"
+  else
+    profile_lab="${LAB_ID:-01-kubectl-basics}"
+  fi
   echo "[lab-e2e] Applying cluster profile for ${profile_lab}..."
   "${K3SLAB_BIN}" apply-cluster-profile "${LABS_ROOT}" "${profile_lab}"
 
@@ -114,13 +134,20 @@ run_lab_e2e() {
     return 1
   fi
   local lab_args=(lab-test --labs-root "${LABS_ROOT}" --json)
-  if [[ -n "${K3SLAB_TEST_LAB}" ]]; then
+  if [[ -n "${K3SLAB_TEST_LABS}" ]]; then
+    lab_args+=(--labs "${K3SLAB_TEST_LABS}")
+  elif [[ -n "${K3SLAB_TEST_LAB}" ]]; then
     lab_args+=(--lab "${K3SLAB_TEST_LAB}")
   fi
 
   local report_base="${K3SLAB_TEST_REPORT_DIR:-/tmp/k3slab-reports}"
   mkdir -p "${report_base}"
   local json_out="${report_base}/lab-e2e.json"
+  if [[ -n "${K3SLAB_TEST_LAB}" ]]; then
+    json_out="${report_base}/lab-e2e-${K3SLAB_TEST_LAB}.json"
+  elif [[ -n "${K3SLAB_TEST_LABS}" ]]; then
+    json_out="${report_base}/lab-e2e-switch.json"
+  fi
 
   set +e
   # JSON on stdout (tee'd to reports); live progress on stderr.

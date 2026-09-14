@@ -38,9 +38,39 @@ type Report struct {
 // Config drives lab-test execution.
 type Config struct {
 	LabsRoot string
-	LabID    string
+	LabID    string   // single lab (legacy / --lab)
+	LabIDs   []string // explicit ordered list (--labs / K3SLAB_TEST_LABS); takes precedence when set
 	Question string
 	JSON     bool
+}
+
+// parseLabIDs merges --lab, --labs, and K3SLAB_TEST_LABS into an ordered unique list.
+// --labs / env win when non-empty; otherwise a single --lab is used.
+func parseLabIDs(labFlag, labsFlag, labsEnv string) []string {
+	raw := strings.TrimSpace(labsFlag)
+	if raw == "" {
+		raw = strings.TrimSpace(labsEnv)
+	}
+	if raw == "" {
+		if id := strings.TrimSpace(labFlag); id != "" {
+			return []string{id}
+		}
+		return nil
+	}
+	var out []string
+	seen := map[string]struct{}{}
+	for _, part := range strings.Split(raw, ",") {
+		id := strings.TrimSpace(part)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 // Main runs lab-test from args (after the subcommand name). Returns exit code.
@@ -48,6 +78,7 @@ func Main(args []string) int {
 	fs := flag.NewFlagSet("lab-test", flag.ExitOnError)
 	labsRoot := fs.String("labs-root", "", "parent directory of lab folders")
 	lab := fs.String("lab", "", "run only this lab id")
+	labs := fs.String("labs", "", "comma-separated lab ids (ordered; resets between labs)")
 	question := fs.String("question", "", "run only this question id")
 	jsonOut := fs.Bool("json", false, "write JSON report to stdout")
 	_ = fs.Parse(args)
@@ -60,11 +91,15 @@ func Main(args []string) int {
 		root = "/lab"
 	}
 
+	labIDs := parseLabIDs(*lab, *labs, os.Getenv("K3SLAB_TEST_LABS"))
 	cfg := Config{
 		LabsRoot: filepath.Clean(root),
-		LabID:    strings.TrimSpace(*lab),
+		LabIDs:   labIDs,
 		Question: strings.TrimSpace(*question),
 		JSON:     *jsonOut,
+	}
+	if len(labIDs) == 1 {
+		cfg.LabID = labIDs[0]
 	}
 
 	report, err := Run(context.Background(), cfg)
@@ -92,18 +127,31 @@ func Run(ctx context.Context, cfg Config) (*Report, error) {
 	}
 	report := &Report{LabsRoot: cfg.LabsRoot}
 
-	var targets []labs.Meta
-	for _, m := range meta {
-		if !m.Valid {
-			continue
-		}
-		if cfg.LabID != "" && m.ID != cfg.LabID {
-			continue
-		}
-		targets = append(targets, m)
+	wanted := cfg.LabIDs
+	if len(wanted) == 0 && cfg.LabID != "" {
+		wanted = []string{cfg.LabID}
 	}
-	if cfg.LabID != "" && len(targets) == 0 {
-		return nil, fmt.Errorf("lab %q not found or invalid under %s", cfg.LabID, cfg.LabsRoot)
+
+	var targets []labs.Meta
+	if len(wanted) > 0 {
+		byID := make(map[string]labs.Meta, len(meta))
+		for _, m := range meta {
+			byID[m.ID] = m
+		}
+		for _, id := range wanted {
+			m, ok := byID[id]
+			if !ok || !m.Valid {
+				return nil, fmt.Errorf("lab %q not found or invalid under %s", id, cfg.LabsRoot)
+			}
+			targets = append(targets, m)
+		}
+	} else {
+		for _, m := range meta {
+			if !m.Valid {
+				continue
+			}
+			targets = append(targets, m)
+		}
 	}
 	if len(targets) == 0 {
 		return report, nil
@@ -185,10 +233,15 @@ func runLab(ctx context.Context, cfg Config, labID string) ([]Result, error) {
 		switch step.Type {
 		case workshop.StepTask:
 			logQuestionStart(labID, step.ID+" (task)")
-			if _, err := eng.RunTask(ctx); err != nil {
+			out, err := eng.RunTask(ctx)
+			if err != nil {
+				msg := fmt.Sprintf("task: %v", err)
+				if strings.TrimSpace(out) != "" {
+					msg += "\n" + strings.TrimSpace(out)
+				}
 				res := Result{
 					LabID: labID, Question: step.ID, Status: "fail",
-					Message: fmt.Sprintf("task: %v", err),
+					Message: msg,
 				}
 				logResult(res)
 				results = append(results, res)

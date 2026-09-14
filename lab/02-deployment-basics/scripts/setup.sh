@@ -16,14 +16,10 @@ progress() {
 export K3SLAB_INGRESS_HOST="${K3SLAB_INGRESS_HOST:-localhost}"
 
 INGRESS_NGINX_CHART_VERSION="${INGRESS_NGINX_CHART_VERSION:-4.12.1}"
-# Must match chart appVersion / controller.image.tag for ${INGRESS_NGINX_CHART_VERSION}.
-INGRESS_NGINX_IMAGE="${INGRESS_NGINX_IMAGE:-registry.k8s.io/ingress-nginx/controller:v1.12.1}"
+# Chart appVersion / controller image: registry.k8s.io/ingress-nginx/controller:v1.12.1
+# (pulled by Helm/kubelet — not via k3s ctr; native snapshotter hits apk whiteout errors)
 
-progress 10 "Pre-pulling ingress-nginx"
-echo "[deployment-basics] Pre-pulling ingress-nginx controller ${INGRESS_NGINX_IMAGE}..."
-k3s ctr images pull "${INGRESS_NGINX_IMAGE}"
-
-progress 30 "Installing ingress-nginx"
+progress 10 "Installing ingress-nginx"
 echo "[deployment-basics] Installing ingress-nginx (Helm ${INGRESS_NGINX_CHART_VERSION})..."
 helm upgrade --install ingress-nginx ingress-nginx \
   --repo https://kubernetes.github.io/ingress-nginx \

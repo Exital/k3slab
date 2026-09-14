@@ -16,18 +16,9 @@ progress() {
 progress 10 "Applying namespaces"
 kubectl apply -f manifests/00-namespace.yml
 
-# Namespace controller creates the default SA asynchronously.
-for _ in $(seq 1 60); do
-  if kubectl -n platform-lab get sa default >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-kubectl -n platform-lab get sa default >/dev/null
-
-progress 30 "Pre-pulling images"
-# Pre-pull chart/job images so Helm install and RBAC job are not racing registries on cold CI.
+# Pre-pull chart/job images in parallel with the default-SA poll.
 # bitnami/kubectl was relocated; bitnamilegacy keeps the old tags.
+progress 30 "Pre-pulling images"
 echo "[platform-lab] Pre-pulling nginx, busybox, and kubectl in parallel..."
 pull_pids=()
 for img in \
@@ -37,6 +28,16 @@ for img in \
   k3s ctr images pull "${img}" &
   pull_pids+=("$!")
 done
+
+# Namespace controller creates the default SA asynchronously.
+for _ in $(seq 1 60); do
+  if kubectl -n platform-lab get sa default >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+kubectl -n platform-lab get sa default >/dev/null
+
 pull_ec=0
 for pid in "${pull_pids[@]}"; do
   wait "${pid}" || pull_ec=1

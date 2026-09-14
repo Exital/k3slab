@@ -32,3 +32,29 @@ func TestHasSolutionIncludesAnswerScript(t *testing.T) {
 		t.Fatal("expected HasSolution with solution_answer_script only")
 	}
 }
+
+func TestParseLabIDs(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		lab, labs, env string
+		want           []string
+	}{
+		{"01-kubectl-basics", "", "", []string{"01-kubectl-basics"}},
+		{"", "01-kubectl-basics,02-deployment-basics", "", []string{"01-kubectl-basics", "02-deployment-basics"}},
+		{"ignored", "01-kubectl-basics, 02-deployment-basics", "", []string{"01-kubectl-basics", "02-deployment-basics"}},
+		{"", "", "01-kubectl-basics,02-deployment-basics", []string{"01-kubectl-basics", "02-deployment-basics"}},
+		{"", "01-kubectl-basics,01-kubectl-basics", "", []string{"01-kubectl-basics"}},
+		{"", "", "", nil},
+	}
+	for _, tc := range tests {
+		got := parseLabIDs(tc.lab, tc.labs, tc.env)
+		if len(got) != len(tc.want) {
+			t.Fatalf("parseLabIDs(%q,%q,%q) len=%d want %d (%v)", tc.lab, tc.labs, tc.env, len(got), len(tc.want), got)
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Fatalf("parseLabIDs(%q,%q,%q)[%d]=%q want %q", tc.lab, tc.labs, tc.env, i, got[i], tc.want[i])
+			}
+		}
+	}
+}

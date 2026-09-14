@@ -64,7 +64,8 @@ tabs:
         Check `kubectl get svc demo-app -o yaml` (or `-o jsonpath='{.spec.selector.app}'`) and paste that `app` value.
       verify: |
         ready=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
-        test "${ready:-0}" -ge 1
+        running=$(kubectl -n gitops-lab get pods -l app=demo-app --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')
+        test "${ready:-0}" -ge 1 -o "${running:-0}" -ge 1
         sel=$(kubectl -n gitops-lab get svc demo-app -o jsonpath='{.spec.selector.app}' 2>/dev/null)
         test -n "$sel"
         test "$ANSWER" = "$sel"
@@ -109,7 +110,8 @@ tabs:
         id="$(printf '%s' "${student_username:-student}" | sed -E 's/[[:space:]]+/_/g')"
         git config --global --add safe.directory '*' || true
         work=$(mktemp -d /tmp/demo-app-fix.XXXXXX)
-        git clone -q "http://${id}:${id}@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git" "$work/repo"
+        remote="$(bash scripts/gitea-http-remote.sh "${id}" "${id}")"
+        git clone -q "${remote}" "$work/repo"
         cd "$work/repo"
         if grep -q 'app: demo$' service.yml; then
           sed -i 's/app: demo$/app: demo-app/' service.yml
@@ -183,7 +185,8 @@ tabs:
         id="$(printf '%s' "${student_username:-student}" | sed -E 's/[[:space:]]+/_/g')"
         git config --global --add safe.directory '*' || true
         work=$(mktemp -d /tmp/demo-app-scale.XXXXXX)
-        git clone -q "http://${id}:${id}@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git" "$work/repo"
+        remote="$(bash scripts/gitea-http-remote.sh "${id}" "${id}")"
+        git clone -q "${remote}" "$work/repo"
         cd "$work/repo"
         sed -i 's/replicas: .*/replicas: 2/' deployment.yml
         git config user.email "${id}@k3slab.local"

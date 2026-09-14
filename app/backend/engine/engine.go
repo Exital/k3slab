@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	taskTimeout   = 10 * time.Minute
-	setupTimeout  = 10 * time.Minute
+	taskTimeout   = 30 * time.Minute
+	setupTimeout  = 30 * time.Minute
 	verifyTimeout = 5 * time.Minute
 )
 

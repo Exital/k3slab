@@ -8,10 +8,32 @@ upsert_host() {
   local ip="$1"
   local name="$2"
   if grep -qE "[[:space:]]${name}([[:space:]]|$)" /etc/hosts 2>/dev/null; then
-    # Already present (possibly stale IP). Leave it — ClusterIPs are stable for the lab lifetime.
+    if grep -qE "^${ip}[[:space:]].*[[:space:]]${name}([[:space:]]|$)|^${ip}[[:space:]]+${name}$" /etc/hosts 2>/dev/null; then
+      return 0
+    fi
+    printf '%s %s\n' "${ip}" "${name}" >>/etc/hosts
+    echo "[gitops-lab] /etc/hosts: appended ${ip} ${name} (prior mapping may be stale)"
     return 0
   fi
   printf '%s %s\n' "${ip}" "${name}" >>/etc/hosts
+}
+
+# Prefer Endpoints/pod IP (works for headless Services and when kube-proxy ClusterIP is broken).
+svc_reach_ip() {
+  local ns="$1"
+  local svc="$2"
+  local ip=""
+  ip="$(kubectl -n "${ns}" get endpoints "${svc}" -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
+  if [[ -n "${ip}" ]]; then
+    printf '%s\n' "${ip}"
+    return 0
+  fi
+  ip="$(kubectl -n "${ns}" get svc "${svc}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
+  if [[ -n "${ip}" && "${ip}" != "None" ]]; then
+    printf '%s\n' "${ip}"
+    return 0
+  fi
+  return 1
 }
 
 map_svc() {
@@ -22,9 +44,8 @@ map_svc() {
     name="${svc}.${ns}.svc.cluster.local"
   fi
   local ip
-  ip="$(kubectl -n "${ns}" get svc "${svc}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
-  if [[ -z "${ip}" || "${ip}" == "None" ]]; then
-    echo "[gitops-lab] warn: no ClusterIP for ${ns}/${svc}" >&2
+  if ! ip="$(svc_reach_ip "${ns}" "${svc}")"; then
+    echo "[gitops-lab] warn: no reachable IP for ${ns}/${svc}" >&2
     return 0
   fi
   upsert_host "${ip}" "${name}"

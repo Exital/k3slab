@@ -82,6 +82,14 @@ apply_gitea() {
   kubectl apply -f "${tmp_gitea}"
   rm -f "${tmp_gitea}"
 
+  # Traefik CRDs can lag briefly after a fresh cluster / lab reset.
+  for _ in $(seq 1 60); do
+    if kubectl get crd middlewares.traefik.io >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  kubectl wait --for=condition=Established crd/middlewares.traefik.io --timeout=120s >/dev/null
   kubectl apply -f manifests/gitea-stripprefix.yml
   tmp_gitea_ing="$(mktemp)"
   if [[ -f manifests/gitea-ingress.yml.template ]]; then
@@ -96,8 +104,16 @@ apply_gitea() {
   kubectl apply -f "${tmp_gitea_ing}"
   rm -f "${tmp_gitea_ing}"
 
-  kubectl -n gitops-lab rollout status deploy/gitea --timeout=300s
-  kubectl -n gitops-lab wait --for=condition=Ready pod -l app=gitea --timeout=300s
+  # Prefer in-pod readiness (exec nc) — then confirm ClusterIP API for seeding.
+  if ! kubectl -n gitops-lab rollout status deploy/gitea --timeout=900s; then
+    echo "[gitops-lab] Gitea rollout failed; diagnostics:" >&2
+    kubectl -n gitops-lab get pods -l app=gitea -o wide >&2 || true
+    kubectl -n gitops-lab describe deploy/gitea >&2 || true
+    kubectl -n gitops-lab describe pod -l app=gitea >&2 || true
+    kubectl -n gitops-lab logs -l app=gitea --tail=80 >&2 || true
+    return 1
+  fi
+  kubectl -n gitops-lab wait --for=condition=Ready pod -l app=gitea --timeout=120s
 
   bash scripts/map-cluster-dns.sh
   echo "[gitops-lab] Seeding Gitea repo..."
@@ -159,13 +175,33 @@ server:
 EOF
 
   echo "[gitops-lab] Installing Argo CD (Helm ${ARGOCD_CHART_VERSION})..."
+  # Do not --wait on Ready: after multi-lab resets, kubelet→pod probes are flaky even
+  # when containers are healthy (host/ClusterIP path). Wait for Running instead.
   helm upgrade --install argocd argo-cd \
     --repo https://argoproj.github.io/argo-helm \
     --namespace argocd \
     --version "${ARGOCD_CHART_VERSION}" \
     --values "${VALUES_FILE}" \
-    --wait --timeout 8m
+    --timeout 15m
   rm -f "${VALUES_FILE}"
+
+  echo "[gitops-lab] Waiting for Argo CD pods to be Running..."
+  ok=0
+  for _ in $(seq 1 120); do
+    # Count Running pods from this Helm release (Ready may stay false if kubelet probes flake).
+    running="$(kubectl -n argocd get pods -l app.kubernetes.io/instance=argocd --no-headers 2>/dev/null | grep -c ' Running ' || true)"
+    total="$(kubectl -n argocd get pods -l app.kubernetes.io/instance=argocd --no-headers 2>/dev/null | grep -cv 'Completed\|Error' || true)"
+    if [[ "${total}" -ge 3 && "${running}" -ge 3 ]]; then
+      ok=1
+      break
+    fi
+    sleep 2
+  done
+  if [[ "${ok}" != "1" ]]; then
+    echo "[gitops-lab] Argo CD pods not Running in time (running=${running:-0} total=${total:-0})" >&2
+    kubectl -n argocd get pods -o wide >&2 || true
+    return 1
+  fi
 
   tmp_argocd_ing="$(mktemp)"
   if [[ -f manifests/argocd-ingress.yml.template ]]; then
@@ -220,12 +256,7 @@ kubectl -n gitops-lab get sa default >/dev/null
 progress 15 "Pre-pulling images"
 echo "[gitops-lab] Pre-pulling images in parallel (Gitea, nginx, redis, Argo CD, python)..."
 pull_pids=()
-for img in \
-  "${GITEA_IMAGE}" \
-  "${NGINX_IMAGE}" \
-  "${REDIS_IMAGE}" \
-  "${ARGOCD_IMAGE}" \
-  "${PYTHON_IMAGE}"; do
+for img in "${GITEA_IMAGE}" "${NGINX_IMAGE}" "${REDIS_IMAGE}" "${ARGOCD_IMAGE}" "${PYTHON_IMAGE}"; do
   k3s ctr images pull "${img}" &
   pull_pids+=("$!")
 done
@@ -238,21 +269,19 @@ if [[ "${pull_ec}" -ne 0 ]]; then
   exit 1
 fi
 
-# Overlap Gitea (apply → seed) with Argo CD (bcrypt → proxy → helm).
-progress 35 "Installing Gitea and Argo CD"
-echo "[gitops-lab] Starting Gitea and Argo CD tracks in parallel..."
+# Parallel tracks: Gitea (apply + seed) alongside Argo CD install.
+progress 35 "Installing Gitea and Argo CD in parallel"
+gitea_ec=0
+argo_ec=0
 (
-  set -euo pipefail
   apply_gitea
 ) &
 gitea_pid=$!
 
 (
-  set -euo pipefail
   echo "[gitops-lab] Generating student password hash..."
   BCRYPT_HASH="$(bcrypt_password "${STUDENT_ID}")"
   apply_webhook_proxy
-  # Proxy can come up while Helm runs.
   kubectl -n gitops-lab rollout status deploy/gitops-webhook-proxy --timeout=180s &
   proxy_wait_pid=$!
   install_argocd "${BCRYPT_HASH}"
@@ -260,11 +289,8 @@ gitea_pid=$!
 ) &
 argo_pid=$!
 
-gitea_ec=0
-argo_ec=0
 wait "${gitea_pid}" || gitea_ec=$?
 wait "${argo_pid}" || argo_ec=$?
-
 if [[ "${gitea_ec}" -ne 0 || "${argo_ec}" -ne 0 ]]; then
   echo "[gitops-lab] Parallel setup failed (gitea_ec=${gitea_ec} argo_ec=${argo_ec})" >&2
   exit 1
@@ -283,23 +309,41 @@ bash scripts/configure-webhook.sh
 # Wait until Argo has synced once (Service selector bug => no endpoints is expected).
 progress 85 "Waiting for Application sync"
 echo "[gitops-lab] Waiting for Application demo-app to appear and sync..."
-for _ in $(seq 1 45); do
+for i in $(seq 1 90); do
   sync=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
   if [[ "${sync}" == "Synced" || "${sync}" == "OutOfSync" ]]; then
     break
+  fi
+  if (( i % 15 == 0 )); then
+    kubectl -n argocd annotate application demo-app argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
   fi
   sleep 2
 done
 kubectl -n argocd get application demo-app >/dev/null
 
-# Best-effort: Deployment from first sync (lab is usable once Application exists).
-for _ in $(seq 1 30); do
-  if kubectl -n gitops-lab get deploy demo-app >/dev/null 2>&1; then
+echo "[gitops-lab] Waiting for demo-app Deployment from Argo sync..."
+ok=0
+for _ in $(seq 1 90); do
+  if ! kubectl -n gitops-lab get deploy demo-app >/dev/null 2>&1; then
+    sleep 2
+    continue
+  fi
+  ready="$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
+  running="$(kubectl -n gitops-lab get pods -l app=demo-app --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+  if [[ "${ready:-0}" -ge 1 || "${running:-0}" -ge 1 ]]; then
+    ok=1
     break
   fi
   sleep 2
 done
-kubectl -n gitops-lab rollout status deploy/demo-app --timeout=60s || true
+if [[ "${ok}" != "1" ]]; then
+  echo "[gitops-lab] demo-app never became Running after Argo sync" >&2
+  kubectl -n argocd get application demo-app -o wide >&2 || true
+  kubectl -n argocd get application demo-app -o yaml 2>&1 | tail -80 >&2 || true
+  kubectl -n gitops-lab get deploy,pods,svc -o wide >&2 || true
+  exit 1
+fi
+kubectl -n gitops-lab rollout status deploy/demo-app --timeout=120s || true
 
 progress 92 "Waiting for Argo CD UI"
 echo "[gitops-lab] Waiting for Argo CD UI at /argocd..."

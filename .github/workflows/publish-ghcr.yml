@@ -17,30 +17,7 @@ env:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Build test image
-        run: docker build -f docker/Dockerfile --target tests -t k3slab-tests .
-
-      - name: Run tests
-        run: |
-          mkdir -p reports
-          docker run --rm --privileged --cgroupns=host -p 80:80 \
-            -e K3SLAB_TEST_REPORT_DIR=/reports \
-            -e GITHUB_ACTIONS=true \
-            -v "${{ github.workspace }}/reports:/reports" \
-            k3slab-tests
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: reports/
-          if-no-files-found: ignore
+    uses: ./.github/workflows/ci.yml
 
   build-push:
     needs: [tests]

@@ -170,14 +170,23 @@ tabs:
       solution_answer_script: |
         set -e
         host="${K3SLAB_INGRESS_HOST:-localhost}"
-        kubectl wait --for=condition=available deploy/simple-ctf --timeout=120s >/dev/null 2>&1 || true
-        for i in $(seq 1 90); do
+        # setup.sh installs ingress-nginx in the background on the first question.
+        for _ in $(seq 1 180); do
+          if kubectl get ns ingress-nginx >/dev/null 2>&1 \
+            && kubectl -n ingress-nginx get deploy ingress-nginx-controller >/dev/null 2>&1; then
+            break
+          fi
+          sleep 2
+        done
+        kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=600s >/dev/null
+        kubectl wait --for=condition=available deploy/simple-ctf --timeout=180s >/dev/null 2>&1 || true
+        for i in $(seq 1 120); do
           flag=$(curl -sS --max-time 2 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty') || true
           if test -n "$flag"; then
             printf '%s\n' "$flag"
             exit 0
           fi
-          sleep 1
+          sleep 2
         done
         exit 1
       hints:

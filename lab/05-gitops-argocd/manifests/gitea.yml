@@ -6,6 +6,9 @@ metadata:
   labels:
     app: gitea
 spec:
+  # Headless: bypass kube-proxy ClusterIP (flaky after multi-lab resets in this lab image).
+  # In-cluster clients (Argo repo-server) resolve DNS to the pod IP via CNI.
+  clusterIP: None
   selector:
     app: gitea
   ports:
@@ -22,6 +25,7 @@ metadata:
     app: gitea
 spec:
   replicas: 1
+  progressDeadlineSeconds: 1200
   selector:
     matchLabels:
       app: gitea
@@ -38,6 +42,9 @@ spec:
             - name: http
               containerPort: 3000
           env:
+            # Official image entrypoint keys off DISABLE_SSH (not GITEA__server__*).
+            - name: DISABLE_SSH
+              value: "true"
             - name: USER_UID
               value: "1000"
             - name: USER_GID
@@ -57,6 +64,8 @@ spec:
               value: "0.0.0.0"
             - name: GITEA__server__DISABLE_SSH
               value: "true"
+            - name: GITEA__server__START_SSH_SERVER
+              value: "false"
             - name: GITEA__service__DISABLE_REGISTRATION
               value: "true"
             - name: GITEA__service__REQUIRE_SIGNIN_VIEW
@@ -64,26 +73,22 @@ spec:
             # Default ALLOWED_HOST_LIST=external blocks ClusterIP webhooks (proxy → Argo).
             - name: GITEA__webhook__ALLOWED_HOST_LIST
               value: "gitops-webhook-proxy.gitops-lab.svc.cluster.local,argocd-server.argocd.svc.cluster.local,private,loopback"
+          # Probe localhost inside the pod (avoids flaky kubelet→pod IP after multi-lab resets).
           readinessProbe:
-            httpGet:
-              path: /
-              port: http
-            initialDelaySeconds: 15
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - nc -z 127.0.0.1 3000 2>/dev/null || wget -q --spider http://127.0.0.1:3000/ 2>/dev/null
             periodSeconds: 5
             timeoutSeconds: 3
-          livenessProbe:
-            httpGet:
-              path: /
-              port: http
-            initialDelaySeconds: 90
-            periodSeconds: 15
-            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             requests:
-              cpu: 50m
-              memory: 128Mi
+              cpu: 200m
+              memory: 256Mi
             limits:
-              memory: 512Mi
+              memory: 768Mi
           volumeMounts:
             - name: data
               mountPath: /data
