@@ -215,19 +215,20 @@ EOF
   sleep 3
 
   # Bypass CoreDNS for controller → repo-server (CI: lookup argocd-repo-server i/o timeout).
+  # Argo reads ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER from argocd-cmd-params-cm key repo.server
+  # (not ARGOCD_REPOSERVER_ADDRESS).
   rs_addr="$(kubectl -n argocd get svc argocd-repo-server -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
   if [[ -n "${rs_addr}" && "${rs_addr}" != "None" ]]; then
-    echo "[gitops-lab] Pinning ARGOCD_REPOSERVER_ADDRESS to ${rs_addr}:8081 (avoid CoreDNS)..."
+    echo "[gitops-lab] Pinning repo.server to ${rs_addr}:8081 (avoid CoreDNS)..."
+    kubectl -n argocd patch configmap argocd-cmd-params-cm --type merge \
+      -p "{\"data\":{\"repo.server\":\"${rs_addr}:8081\"}}" >/dev/null
     if kubectl -n argocd get statefulset argocd-application-controller >/dev/null 2>&1; then
-      kubectl -n argocd set env statefulset/argocd-application-controller \
-        "ARGOCD_REPOSERVER_ADDRESS=${rs_addr}:8081" >/dev/null
+      kubectl -n argocd rollout restart statefulset/argocd-application-controller >/dev/null
       kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=180s >/dev/null || true
     elif kubectl -n argocd get deploy argocd-application-controller >/dev/null 2>&1; then
-      kubectl -n argocd set env deploy/argocd-application-controller \
-        "ARGOCD_REPOSERVER_ADDRESS=${rs_addr}:8081" >/dev/null
+      kubectl -n argocd rollout restart deploy/argocd-application-controller >/dev/null
       kubectl -n argocd rollout status deploy/argocd-application-controller --timeout=180s >/dev/null || true
     fi
-    # Wait until the new controller pod is Running again.
     for _ in $(seq 1 60); do
       ctrl_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-application-controller --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
       if [[ "${ctrl_phase}" == "Running" ]]; then
@@ -373,10 +374,8 @@ for i in $(seq 1 120); do
       echo "[gitops-lab] Application ComparisonError (${cond}); refreshing + bouncing application-controller..." >&2
       rs_addr="$(kubectl -n argocd get svc argocd-repo-server -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
       if [[ -n "${rs_addr}" && "${rs_addr}" != "None" ]]; then
-        if kubectl -n argocd get statefulset argocd-application-controller >/dev/null 2>&1; then
-          kubectl -n argocd set env statefulset/argocd-application-controller \
-            "ARGOCD_REPOSERVER_ADDRESS=${rs_addr}:8081" >/dev/null 2>&1 || true
-        fi
+        kubectl -n argocd patch configmap argocd-cmd-params-cm --type merge \
+          -p "{\"data\":{\"repo.server\":\"${rs_addr}:8081\"}}" >/dev/null 2>&1 || true
       fi
       kubectl -n argocd delete pod -l app.kubernetes.io/name=argocd-application-controller --ignore-not-found >/dev/null 2>&1 || true
       sleep 8
