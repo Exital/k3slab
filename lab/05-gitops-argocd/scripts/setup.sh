@@ -214,6 +214,31 @@ EOF
   kubectl -n kube-system wait --for=condition=Ready pod -l k8s-app=kube-dns --timeout=120s >/dev/null 2>&1 || true
   sleep 3
 
+  # Bypass CoreDNS for controller → repo-server (CI: lookup argocd-repo-server i/o timeout).
+  rs_addr="$(kubectl -n argocd get svc argocd-repo-server -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
+  if [[ -n "${rs_addr}" && "${rs_addr}" != "None" ]]; then
+    echo "[gitops-lab] Pinning ARGOCD_REPOSERVER_ADDRESS to ${rs_addr}:8081 (avoid CoreDNS)..."
+    if kubectl -n argocd get statefulset argocd-application-controller >/dev/null 2>&1; then
+      kubectl -n argocd set env statefulset/argocd-application-controller \
+        "ARGOCD_REPOSERVER_ADDRESS=${rs_addr}:8081" >/dev/null
+      kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=180s >/dev/null || true
+    elif kubectl -n argocd get deploy argocd-application-controller >/dev/null 2>&1; then
+      kubectl -n argocd set env deploy/argocd-application-controller \
+        "ARGOCD_REPOSERVER_ADDRESS=${rs_addr}:8081" >/dev/null
+      kubectl -n argocd rollout status deploy/argocd-application-controller --timeout=180s >/dev/null || true
+    fi
+    # Wait until the new controller pod is Running again.
+    for _ in $(seq 1 60); do
+      ctrl_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-application-controller --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
+      if [[ "${ctrl_phase}" == "Running" ]]; then
+        break
+      fi
+      sleep 2
+    done
+  else
+    echo "[gitops-lab] Warning: could not resolve argocd-repo-server ClusterIP" >&2
+  fi
+
   tmp_argocd_ing="$(mktemp)"
   if [[ -f manifests/argocd-ingress.yml.template ]]; then
     export K3SLAB_INGRESS_HOST
@@ -309,6 +334,22 @@ fi
 
 bash scripts/map-cluster-dns.sh
 
+# Repo-server clones via CoreDNS too — pin gitea hostname to pod IP (same CI DNS flake).
+gitea_ip="$(kubectl -n gitops-lab get endpoints gitea -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
+if [[ -n "${gitea_ip}" ]]; then
+  echo "[gitops-lab] Pinning gitea.gitops-lab.svc.cluster.local → ${gitea_ip} on argocd-repo-server..."
+  kubectl -n argocd patch deploy argocd-repo-server --type strategic --patch-file=/dev/stdin <<EOF
+spec:
+  template:
+    spec:
+      hostAliases:
+        - ip: "${gitea_ip}"
+          hostnames:
+            - gitea.gitops-lab.svc.cluster.local
+EOF
+  kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=180s >/dev/null || true
+fi
+
 progress 75 "Registering Application"
 echo "[gitops-lab] Registering repo + Application..."
 kubectl apply -f manifests/application.yml
@@ -325,14 +366,20 @@ for i in $(seq 1 120); do
   if [[ "${sync}" == "Synced" || "${sync}" == "OutOfSync" ]]; then
     break
   fi
-  # Recover from transient CoreDNS / repo-server dial failures on cold CI runners.
-  if (( i % 10 == 0 )); then
+  # Recover from transient repo-server dial failures — do NOT bounce CoreDNS (makes DNS worse).
+  if (( i % 15 == 0 )); then
     cond="$(kubectl -n argocd get application demo-app -o jsonpath='{.status.conditions[0].message}' 2>/dev/null || true)"
     if [[ "${cond}" == *argocd-repo-server* || "${cond}" == *i/o\ timeout* || "${cond}" == *connection\ error* ]]; then
-      echo "[gitops-lab] Application ComparisonError (${cond}); bouncing application-controller..." >&2
+      echo "[gitops-lab] Application ComparisonError (${cond}); refreshing + bouncing application-controller..." >&2
+      rs_addr="$(kubectl -n argocd get svc argocd-repo-server -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
+      if [[ -n "${rs_addr}" && "${rs_addr}" != "None" ]]; then
+        if kubectl -n argocd get statefulset argocd-application-controller >/dev/null 2>&1; then
+          kubectl -n argocd set env statefulset/argocd-application-controller \
+            "ARGOCD_REPOSERVER_ADDRESS=${rs_addr}:8081" >/dev/null 2>&1 || true
+        fi
+      fi
       kubectl -n argocd delete pod -l app.kubernetes.io/name=argocd-application-controller --ignore-not-found >/dev/null 2>&1 || true
-      kubectl -n kube-system delete pod -l k8s-app=kube-dns --ignore-not-found >/dev/null 2>&1 || true
-      sleep 5
+      sleep 8
     fi
     kubectl -n argocd annotate application demo-app argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
   fi
@@ -363,6 +410,8 @@ if [[ "${ok}" != "1" ]]; then
   kubectl -n argocd get application demo-app -o wide >&2 || true
   kubectl -n argocd get application demo-app -o yaml 2>&1 | tail -80 >&2 || true
   kubectl -n argocd get pods -o wide >&2 || true
+  kubectl -n argocd get svc,endpoints argocd-repo-server -o wide >&2 || true
+  kubectl -n kube-system get pods -l k8s-app=kube-dns -o wide >&2 || true
   kubectl -n gitops-lab get deploy,pods,svc -o wide >&2 || true
   exit 1
 fi
