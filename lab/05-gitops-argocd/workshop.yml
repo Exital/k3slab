@@ -81,17 +81,24 @@ tabs:
 
     - id: question-fix-via-git
       type: question
-      title: Fix the selector in Git and push
+      title: Fix the selector in Git
       description: |
         **Platform ticket #3:** repair GitOps the right way.
 
-        Clone the repo, fix Service **`demo-app`** so its selector is **`app: demo-app`** (matching the pods), commit, and push.
+        Fix Service **`demo-app`** in Git so its selector is **`app: demo-app`** (matching the pods), then commit.
         Argo CD auto-syncs from Gitea — do **not** treat `kubectl edit` as the source of truth.
 
-        Use the **same credentials as Argo CD** (your normalized `student_username`). Build the clone URL with:
-        `id=$(echo "${student_username:-student}" | sed -E 's/[[:space:]]+/_/g'); echo "http://${id}:${id}@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git"`
+        You can do either:
 
-        A **Gitea push webhook** notifies Argo CD immediately (you should not need to wait for the poll interval).
+        1. **Edit in the Gitea UI (browser):** open
+           **`http://<ingress-host>/gitea/gitops/demo-app/src/branch/main/service.yml`**
+           (default **`http://localhost/gitea/gitops/demo-app/src/branch/main/service.yml`**, or use **Open in browser** on the Gitea tab).
+           Log in with the **same credentials as Argo CD**, edit the selector, and commit on **main**.
+
+        2. **Clone and push** from the terminal. Same credentials (normalized `student_username`):
+           `id=$(echo "${student_username:-student}" | sed -E 's/[[:space:]]+/_/g'); echo "http://${id}:${id}@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git"`
+
+        Argo CD polls Git about every **10 seconds**, so after you commit you should see sync shortly (no manual refresh required).
 
         This step completes automatically when the Service has endpoints and Argo shows **Synced**.
       answer_type: observe
@@ -143,8 +150,8 @@ tabs:
         kubectl -n argocd get application demo-app -o wide >&2 || true
         exit 1
       hints:
+        - "Gitea UI: `http://${K3SLAB_INGRESS_HOST:-localhost}/gitea/gitops/demo-app/src/branch/main/service.yml` — edit selector to `app: demo-app` and commit"
         - "`id=$(echo \"${student_username:-student}\" | sed -E 's/[[:space:]]+/_/g'); git clone http://${id}:${id}@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git`"
-        - "Edit `service.yml` selector to `app: demo-app`, then `git commit` and `git push`"
         - "`kubectl -n argocd get applications` — wait for Synced; `kubectl get endpoints demo-app`"
 
     - id: question-gitops-concept
@@ -234,6 +241,83 @@ tabs:
       hints:
         - "Self-heal was enabled on the Application for a reason"
 
+    - id: question-ctf-ingress-flag
+      type: question
+      title: Expose the CTF app and capture the flag
+      description: |
+        **Platform ticket #5:** the app behind **`demo-app`** is the same CTF challenge from earlier labs
+        (`ghcr.io/exital/simple-ctf`). It is running in **`gitops-lab`**, but nothing publishes it to the browser yet.
+
+        1. Create a **Traefik** Ingress (and strip-prefix Middleware if needed) so the Service **`demo-app`**
+           is available at **`http://<ingress-host>/ctf/`** (your machine hostname).
+        2. Open that URL (or **`/ctf/api/flag`**) and capture the **flag**.
+        3. Paste the flag here (e.g. `CTF{...}`).
+
+        Tip: Gitea already uses a Traefik Middleware + Ingress in this cluster — mirror that pattern for **`/ctf`**,
+        backend Service **`demo-app`** port **80** (it targets container port **3000**).
+      answer_type: text
+      correct_message: |
+        Got it — Ingress is up and you pulled the flag from the CTF app.
+      incorrect_message: |
+        Not quite — make sure `/ctf` reaches Service `demo-app`, then paste the exact `flag` from
+        `http://<ingress-host>/ctf/api/flag` (JSON field `flag`).
+      verify: |
+        host="${K3SLAB_INGRESS_HOST:-localhost}"
+        ready=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
+        test "${ready:-0}" -ge 1
+        expected=$(curl -sS --max-time 5 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty')
+        test -n "$expected"
+        test "$ANSWER" = "$expected"
+      solution_answer_script: |
+        set -euo pipefail
+        host="${K3SLAB_INGRESS_HOST:-localhost}"
+        ns=gitops-lab
+        kubectl -n "${ns}" apply -f - <<EOF
+        apiVersion: traefik.io/v1alpha1
+        kind: Middleware
+        metadata:
+          name: ctf-stripprefix
+          namespace: ${ns}
+        spec:
+          stripPrefix:
+            prefixes:
+              - /ctf
+        ---
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata:
+          name: demo-app-ctf
+          namespace: ${ns}
+          annotations:
+            traefik.ingress.kubernetes.io/router.middlewares: ${ns}-ctf-stripprefix@kubernetescrd
+        spec:
+          rules:
+            - host: ${host}
+              http:
+                paths:
+                  - path: /ctf
+                    pathType: Prefix
+                    backend:
+                      service:
+                        name: demo-app
+                        port:
+                          number: 80
+        EOF
+        for _ in $(seq 1 60); do
+          flag=$(curl -sS --max-time 3 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' 2>/dev/null | jq -r '.flag // empty' || true)
+          if [[ -n "${flag}" ]]; then
+            printf '%s\n' "${flag}"
+            exit 0
+          fi
+          sleep 2
+        done
+        echo "ctf flag endpoint not reachable" >&2
+        exit 1
+      hints:
+        - "Create Middleware `stripPrefix: [/ctf]` and an Ingress path `/ctf` → Service `demo-app:80`"
+        - "Annotation: `traefik.ingress.kubernetes.io/router.middlewares: gitops-lab-ctf-stripprefix@kubernetescrd`"
+        - "`curl -s -H \"Host: ${K3SLAB_INGRESS_HOST:-localhost}\" http://127.0.0.1/ctf/api/flag`"
+
   markdowns:
     - id: mission-brief
       title: Mission brief
@@ -246,6 +330,7 @@ tabs:
         1. Log into **Argo CD** and read the **ticket** info field on **`demo-app`**.
         2. Inspect the broken Service selector in **`gitops-lab`**.
         3. Fix and scale the app by **committing to Gitea** (same login as Argo) — Argo CD syncs for you.
+        4. Expose the CTF app with a Traefik Ingress at **`/ctf`** and capture the flag.
 
         Namespace: **`gitops-lab`** (default after setup). Argo CD lives in **`argocd`**.
 
@@ -262,7 +347,7 @@ tabs:
         - Git clone (in-cluster), using that same id:
           `id=$(echo "${student_username:-student}" | sed -E 's/[[:space:]]+/_/g')`
           `git clone http://${id}:${id}@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git`
-        - After `git push`, Gitea webhooks Argo CD for an immediate refresh (poll backup ~180s)
+        - After you commit to Gitea, Argo CD picks it up on its reconciliation poll (~**10s**)
 
         ## Useful commands
 
@@ -278,7 +363,6 @@ tabs:
         ## How this lab is wired
 
         - **Gitea** holds desired state for `demo-app` (platform user `gitops` seeds the repo; your student user has admin on it).
-        - **Argo CD** Application `demo-app` watches that repo with **automated sync** + **self-heal**.
-        - **Webhook:** Gitea sends a push hook (Gogs-compatible) to Argo CD (`/argocd/api/webhook`) so syncs start right after `git push`, not only on the reconciliation poll (backup ~180s).
+        - **Argo CD** Application `demo-app` watches that repo with **automated sync** + **self-heal**, and reconciles about every **10 seconds**.
         - Live `kubectl edit` fights GitOps: self-heal will revert drift back toward Git.
         - Ticket is on the Application as **info** field `ticket` (= `PLATFORM-GITOPS-7`) in the Argo CD UI summary.

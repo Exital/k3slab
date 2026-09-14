@@ -17,12 +17,17 @@ spec:
     spec:
       containers:
         - name: demo
-          image: docker.io/library/nginx:1.27-alpine
+          image: ghcr.io/exital/simple-ctf:0.0.3
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CTF_RELAY_MODE
+              value: active
           ports:
-            - containerPort: 80
+            - containerPort: 3000
+              name: http
           resources:
             requests:
               cpu: 25m
-              memory: 32Mi
-            limits:
               memory: 64Mi
+            limits:
+              memory: 128Mi

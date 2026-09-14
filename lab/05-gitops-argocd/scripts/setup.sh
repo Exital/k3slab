@@ -19,9 +19,8 @@ export STUDENT_ID
 ARGOCD_CHART_VERSION="${ARGOCD_CHART_VERSION:-7.9.1}"
 ARGOCD_APP_VERSION="${ARGOCD_APP_VERSION:-v2.14.11}"
 GITEA_IMAGE="${GITEA_IMAGE:-docker.io/gitea/gitea:1.22.6}"
-NGINX_IMAGE="${NGINX_IMAGE:-docker.io/library/nginx:1.27-alpine}"
+CTF_IMAGE="${CTF_IMAGE:-ghcr.io/exital/simple-ctf:0.0.3}"
 REDIS_IMAGE="${REDIS_IMAGE:-public.ecr.aws/docker/library/redis:7.2.8-alpine}"
-PYTHON_IMAGE="${PYTHON_IMAGE:-docker.io/library/python:3.12-alpine}"
 ARGOCD_IMAGE="quay.io/argoproj/argocd:${ARGOCD_APP_VERSION}"
 
 elapsed() { echo $(( $(date +%s) - SETUP_START )); }
@@ -139,18 +138,6 @@ apply_gitea() {
   bash scripts/seed-repo.sh
 }
 
-apply_webhook_proxy() {
-  stage "webhook-proxy: apply + rollout (timeout 2m)"
-  tmp_proxy="$(mktemp)"
-  proxy_from="http://${K3SLAB_INGRESS_HOST}/gitea"
-  proxy_from_esc="$(printf '%s' "${proxy_from}" | sed -e 's/[&|\\]/\\&/g')"
-  sed -e "s|value: http://localhost/gitea|value: ${proxy_from_esc}|" \
-    manifests/webhook-proxy.yml >"${tmp_proxy}"
-  kubectl apply -f "${tmp_proxy}"
-  rm -f "${tmp_proxy}"
-  kubectl -n gitops-lab rollout status deploy/gitops-webhook-proxy --timeout=120s
-}
-
 install_argocd() {
   local bcrypt_hash="$1"
   VALUES_FILE="$(mktemp)"
@@ -172,7 +159,8 @@ configs:
     server.basehref: "/argocd"
   cm:
     accounts.${STUDENT_ID}: login
-    timeout.reconciliation: 180s
+    # Lab UX: poll Git often instead of a fragile in-cluster push webhook.
+    timeout.reconciliation: 10s
   rbac:
     policy.csv: |
       g, ${STUDENT_ID}, role:readonly
@@ -180,8 +168,6 @@ configs:
   secret:
     extra:
       accounts.${STUDENT_ID}.password: '${bcrypt_hash}'
-      webhook.gogs.secret: k3slab-gitops-webhook
-      webhook.gitea.secret: k3slab-gitops-webhook
 redis:
   image:
     repository: public.ecr.aws/docker/library/redis
@@ -270,15 +256,6 @@ EOF
     kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=120s >/dev/null
   fi
 
-  # Webhook proxy → Argo / Gitea rewrite: use pod IPs (CoreDNS flaky on CI).
-  argo_ip="$(kubectl -n argocd get endpoints argocd-server -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
-  if [[ -n "${argo_ip}" ]]; then
-    stage "wire: webhook-proxy env → argocd=${argo_ip} gitea=${gitea_ip}"
-    kubectl -n gitops-lab set env deploy/gitops-webhook-proxy \
-      "ARGO_WEBHOOK_URL=http://${argo_ip}/argocd/api/webhook" \
-      "REPL_TO=http://${gitea_ip}:3000" >/dev/null
-    kubectl -n gitops-lab rollout status deploy/gitops-webhook-proxy --timeout=90s >/dev/null
-  fi
 }
 
 wait_application_sync() {
@@ -341,7 +318,7 @@ run_setup() {
   progress 15 "Pre-pulling images"
   stage "pre-pull images (parallel)"
   pull_pids=()
-  for img in "${GITEA_IMAGE}" "${NGINX_IMAGE}" "${REDIS_IMAGE}" "${ARGOCD_IMAGE}" "${PYTHON_IMAGE}"; do
+  for img in "${GITEA_IMAGE}" "${CTF_IMAGE}" "${REDIS_IMAGE}" "${ARGOCD_IMAGE}"; do
     echo "[gitops-lab] pull start: ${img}"
     k3s ctr images pull "${img}" &
     pull_pids+=("$!")
@@ -361,10 +338,6 @@ run_setup() {
   apply_gitea
   check_budget
 
-  progress 45 "Installing webhook proxy"
-  apply_webhook_proxy
-  check_budget
-
   progress 55 "Installing Argo CD"
   stage "bcrypt"
   BCRYPT_HASH="$(bcrypt_password "${STUDENT_ID}")" || die "bcrypt failed"
@@ -379,11 +352,6 @@ run_setup() {
   progress 75 "Registering Application"
   stage "apply Application"
   kubectl apply -f manifests/application.yml
-
-  progress 80 "Configuring webhook"
-  stage "configure webhook"
-  bash scripts/configure-webhook.sh
-  check_budget
 
   progress 85 "Waiting for Application sync"
   wait_application_sync || die "Application never Synced/OutOfSync"
