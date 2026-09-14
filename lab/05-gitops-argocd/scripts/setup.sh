@@ -209,36 +209,10 @@ EOF
     return 1
   fi
 
-  # Give CoreDNS a moment after the Argo pod storm (GHA runners get lookup timeouts otherwise).
+  # Give CoreDNS a moment after the Argo pod storm.
   echo "[gitops-lab] Waiting for CoreDNS to be Running..."
   kubectl -n kube-system wait --for=condition=Ready pod -l k8s-app=kube-dns --timeout=120s >/dev/null 2>&1 || true
   sleep 3
-
-  # Bypass CoreDNS for controller → repo-server (CI: lookup argocd-repo-server i/o timeout).
-  # Argo reads ARGOCD_APPLICATION_CONTROLLER_REPO_SERVER from argocd-cmd-params-cm key repo.server
-  # (not ARGOCD_REPOSERVER_ADDRESS).
-  rs_addr="$(kubectl -n argocd get svc argocd-repo-server -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
-  if [[ -n "${rs_addr}" && "${rs_addr}" != "None" ]]; then
-    echo "[gitops-lab] Pinning repo.server to ${rs_addr}:8081 (avoid CoreDNS)..."
-    kubectl -n argocd patch configmap argocd-cmd-params-cm --type merge \
-      -p "{\"data\":{\"repo.server\":\"${rs_addr}:8081\"}}" >/dev/null
-    if kubectl -n argocd get statefulset argocd-application-controller >/dev/null 2>&1; then
-      kubectl -n argocd rollout restart statefulset/argocd-application-controller >/dev/null
-      kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=180s >/dev/null || true
-    elif kubectl -n argocd get deploy argocd-application-controller >/dev/null 2>&1; then
-      kubectl -n argocd rollout restart deploy/argocd-application-controller >/dev/null
-      kubectl -n argocd rollout status deploy/argocd-application-controller --timeout=180s >/dev/null || true
-    fi
-    for _ in $(seq 1 60); do
-      ctrl_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-application-controller --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
-      if [[ "${ctrl_phase}" == "Running" ]]; then
-        break
-      fi
-      sleep 2
-    done
-  else
-    echo "[gitops-lab] Warning: could not resolve argocd-repo-server ClusterIP" >&2
-  fi
 
   tmp_argocd_ing="$(mktemp)"
   if [[ -f manifests/argocd-ingress.yml.template ]]; then
@@ -262,6 +236,35 @@ EOF
   rbac_json="$(jq -n --arg u "${STUDENT_ID}" \
     '{data: {"policy.csv": ("g, " + $u + ", role:readonly\n"), "policy.default": "role:readonly"}}')"
   kubectl -n argocd patch configmap argocd-rbac-cm --type merge -p "${rbac_json}" >/dev/null
+}
+
+# Point application-controller at repo-server via pod IP (ClusterIP often blackholes on CI nested K3s).
+pin_argocd_repo_server() {
+  local rs_ip
+  rs_ip="$(kubectl -n argocd get endpoints argocd-repo-server -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
+  if [[ -z "${rs_ip}" ]]; then
+    echo "[gitops-lab] Warning: no argocd-repo-server endpoint IP" >&2
+    return 1
+  fi
+  echo "[gitops-lab] Pinning repo.server to ${rs_ip}:8081 (pod IP; avoid CoreDNS + ClusterIP)..."
+  kubectl -n argocd patch configmap argocd-cmd-params-cm --type merge \
+    -p "{\"data\":{\"repo.server\":\"${rs_ip}:8081\"}}" >/dev/null
+  if kubectl -n argocd get statefulset argocd-application-controller >/dev/null 2>&1; then
+    kubectl -n argocd rollout restart statefulset/argocd-application-controller >/dev/null
+    kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=180s >/dev/null || true
+  elif kubectl -n argocd get deploy argocd-application-controller >/dev/null 2>&1; then
+    kubectl -n argocd rollout restart deploy/argocd-application-controller >/dev/null
+    kubectl -n argocd rollout status deploy/argocd-application-controller --timeout=180s >/dev/null || true
+  fi
+  local _ ctrl_phase
+  for _ in $(seq 1 60); do
+    ctrl_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-application-controller --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
+    if [[ "${ctrl_phase}" == "Running" ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 0
 }
 
 # --- main --------------------------------------------------------------------
@@ -351,6 +354,9 @@ EOF
   kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=180s >/dev/null || true
 fi
 
+# After repo-server (re)starts, pin controller to its pod IP (ClusterIP blackholes on CI).
+pin_argocd_repo_server || true
+
 progress 75 "Registering Application"
 echo "[gitops-lab] Registering repo + Application..."
 kubectl apply -f manifests/application.yml
@@ -367,18 +373,13 @@ for i in $(seq 1 120); do
   if [[ "${sync}" == "Synced" || "${sync}" == "OutOfSync" ]]; then
     break
   fi
-  # Recover from transient repo-server dial failures — do NOT bounce CoreDNS (makes DNS worse).
+  # Recover from dial failures — re-pin to current repo-server pod IP (not ClusterIP / CoreDNS).
   if (( i % 15 == 0 )); then
     cond="$(kubectl -n argocd get application demo-app -o jsonpath='{.status.conditions[0].message}' 2>/dev/null || true)"
-    if [[ "${cond}" == *argocd-repo-server* || "${cond}" == *i/o\ timeout* || "${cond}" == *connection\ error* ]]; then
-      echo "[gitops-lab] Application ComparisonError (${cond}); refreshing + bouncing application-controller..." >&2
-      rs_addr="$(kubectl -n argocd get svc argocd-repo-server -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
-      if [[ -n "${rs_addr}" && "${rs_addr}" != "None" ]]; then
-        kubectl -n argocd patch configmap argocd-cmd-params-cm --type merge \
-          -p "{\"data\":{\"repo.server\":\"${rs_addr}:8081\"}}" >/dev/null 2>&1 || true
-      fi
-      kubectl -n argocd delete pod -l app.kubernetes.io/name=argocd-application-controller --ignore-not-found >/dev/null 2>&1 || true
-      sleep 8
+    if [[ "${cond}" == *repo-server* || "${cond}" == *i/o\ timeout* || "${cond}" == *connection\ error* || "${cond}" == *10.43.* ]]; then
+      echo "[gitops-lab] Application ComparisonError (${cond}); re-pinning repo.server to pod IP..." >&2
+      pin_argocd_repo_server || true
+      sleep 5
     fi
     kubectl -n argocd annotate application demo-app argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
   fi
