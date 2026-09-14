@@ -377,15 +377,22 @@ run_setup() {
   kubectl -n gitops-lab rollout status deploy/demo-app --timeout=60s || true
 
   progress 92 "Waiting for Argo CD UI"
-  stage "UI probe"
+  stage "UI probe (non-blocking, 20s max)"
   host="${K3SLAB_INGRESS_HOST}"
+  ui_ok=0
   for _ in $(seq 1 10); do
-    if curl -sf -H "Host: ${host}" "http://127.0.0.1/argocd/" >/dev/null 2>&1 \
-      || curl -sf -H "Host: ${host}" "http://127.0.0.1/argocd" >/dev/null 2>&1; then
+    if curl -sf --connect-timeout 2 --max-time 3 -H "Host: ${host}" "http://127.0.0.1/argocd/" >/dev/null 2>&1 \
+      || curl -sf --connect-timeout 2 --max-time 3 -H "Host: ${host}" "http://127.0.0.1/argocd" >/dev/null 2>&1; then
+      ui_ok=1
       break
     fi
-    sleep 2
+    sleep 1
   done
+  if [[ "${ui_ok}" -eq 1 ]]; then
+    echo "[gitops-lab] Argo CD UI reachable (t=$(elapsed)s)"
+  else
+    echo "[gitops-lab] Argo CD UI not reachable yet (t=$(elapsed)s); continuing — lab still usable"
+  fi
 
   kubectl config set-context --current --namespace=gitops-lab >/dev/null
   progress 98 "Finishing"
