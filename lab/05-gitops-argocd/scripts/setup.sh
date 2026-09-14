@@ -268,6 +268,16 @@ EOF
     kubectl -n argocd rollout restart statefulset/argocd-application-controller >/dev/null
     kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=120s >/dev/null
   fi
+
+  # Webhook proxy → Argo / Gitea rewrite: use pod IPs (CoreDNS flaky on CI).
+  argo_ip="$(kubectl -n argocd get endpoints argocd-server -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
+  if [[ -n "${argo_ip}" ]]; then
+    stage "wire: webhook-proxy env → argocd=${argo_ip} gitea=${gitea_ip}"
+    kubectl -n gitops-lab set env deploy/gitops-webhook-proxy \
+      "ARGO_WEBHOOK_URL=http://${argo_ip}/argocd/api/webhook" \
+      "REPL_TO=http://${gitea_ip}:3000" >/dev/null
+    kubectl -n gitops-lab rollout status deploy/gitops-webhook-proxy --timeout=90s >/dev/null
+  fi
 }
 
 wait_application_sync() {

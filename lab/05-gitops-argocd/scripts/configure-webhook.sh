@@ -9,7 +9,6 @@ GITEA_USER="${GITEA_USER:-gitops}"
 GITEA_PASS="${GITEA_PASS:-gitops123}"
 REPO_NAME="${REPO_NAME:-demo-app}"
 WEBHOOK_SECRET="${WEBHOOK_SECRET:-k3slab-gitops-webhook}"
-ARGOCD_WEBHOOK_URL="${ARGOCD_WEBHOOK_URL:-http://gitops-webhook-proxy.gitops-lab.svc.cluster.local:8080/}"
 
 bash scripts/map-cluster-dns.sh
 
@@ -18,6 +17,17 @@ if [[ -z "${gitea_ip}" ]]; then
   gitea_ip="$(kubectl -n gitops-lab get svc gitea -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
 fi
 GITEA_URL="${GITEA_URL:-http://${gitea_ip}:3000}"
+
+# Prefer webhook-proxy pod IP — Gitea may not resolve Service DNS under CI load.
+if [[ -z "${ARGOCD_WEBHOOK_URL:-}" ]]; then
+  proxy_ip="$(kubectl -n gitops-lab get endpoints gitops-webhook-proxy -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null || true)"
+  if [[ -n "${proxy_ip}" ]]; then
+    ARGOCD_WEBHOOK_URL="http://${proxy_ip}:8080/"
+    echo "[gitops-lab] Using webhook-proxy pod IP: ${ARGOCD_WEBHOOK_URL}"
+  else
+    ARGOCD_WEBHOOK_URL="http://gitops-webhook-proxy.gitops-lab.svc.cluster.local:8080/"
+  fi
+fi
 PF_PID=""
 
 cleanup() {

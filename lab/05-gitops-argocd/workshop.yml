@@ -125,16 +125,22 @@ tabs:
         git add service.yml
         git commit -q -m "Fix Service selector to match demo-app pods" || true
         git push -q origin HEAD:main
-        for _ in $(seq 1 60); do
+        for i in $(seq 1 36); do
+          kubectl -n argocd annotate application demo-app argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
           sel=$(kubectl -n gitops-lab get svc demo-app -o jsonpath='{.spec.selector.app}' 2>/dev/null || true)
           addrs=$(kubectl -n gitops-lab get endpoints demo-app -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)
           sync=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
           if [[ "$sel" == "demo-app" && -n "$addrs" && "$sync" == "Synced" ]]; then
             exit 0
           fi
+          if (( i % 6 == 0 )); then
+            cond=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.conditions[0].message}' 2>/dev/null || true)
+            echo "waiting sync sel=${sel:-?} addrs=${addrs:-?} sync=${sync:-?} cond=${cond:-none}" >&2
+          fi
           sleep 5
         done
         echo "timed out waiting for GitOps sync after selector fix" >&2
+        kubectl -n argocd get application demo-app -o wide >&2 || true
         exit 1
       hints:
         - "`id=$(echo \"${student_username:-student}\" | sed -E 's/[[:space:]]+/_/g'); git clone http://${id}:${id}@gitea.gitops-lab.svc.cluster.local:3000/gitops/demo-app.git`"
@@ -194,7 +200,8 @@ tabs:
         git add deployment.yml
         git commit -q -m "Scale demo-app to 2 replicas" || true
         git push -q origin HEAD:main
-        for _ in $(seq 1 60); do
+        for i in $(seq 1 36); do
+          kubectl -n argocd annotate application demo-app argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
           replicas=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.spec.replicas}' 2>/dev/null || true)
           ready=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)
           sync=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
