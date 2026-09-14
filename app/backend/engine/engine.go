@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -19,10 +20,32 @@ import (
 )
 
 const (
-	taskTimeout   = 30 * time.Minute
-	setupTimeout  = 30 * time.Minute
-	verifyTimeout = 5 * time.Minute
+	// Default task/setup budgets. Lab 05 prepare also enforces its own ~8m shell timeout.
+	// Override with K3SLAB_TASK_TIMEOUT_SEC / K3SLAB_SETUP_TIMEOUT_SEC (seconds).
+	defaultTaskTimeout  = 30 * time.Minute
+	defaultSetupTimeout = 30 * time.Minute
+	verifyTimeout       = 5 * time.Minute
 )
+
+func envDurationSeconds(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	sec, err := time.ParseDuration(raw + "s")
+	if err != nil || sec <= 0 {
+		return fallback
+	}
+	return sec
+}
+
+func taskTimeout() time.Duration {
+	return envDurationSeconds("K3SLAB_TASK_TIMEOUT_SEC", defaultTaskTimeout)
+}
+
+func setupTimeout() time.Duration {
+	return envDurationSeconds("K3SLAB_QUESTION_SETUP_TIMEOUT_SEC", defaultSetupTimeout)
+}
 
 // Engine holds workshop progression (single learner, in-memory).
 type Engine struct {
@@ -266,7 +289,7 @@ func (e *Engine) RunTask(ctx context.Context) (logs string, err error) {
 	defer func() {
 		e.progress.Finish(ok)
 	}()
-	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
+	ctx, cancel := context.WithTimeout(ctx, taskTimeout())
 	defer cancel()
 	code, err := e.runShell(ctx, st.Run, &e.lastTaskOut, e.hub)
 	if err != nil {
@@ -303,7 +326,7 @@ func (e *Engine) RunQuestionSetup(ctx context.Context) (logs string, err error) 
 	defer func() {
 		e.progress.Finish(ok)
 	}()
-	ctx, cancel := context.WithTimeout(ctx, setupTimeout)
+	ctx, cancel := context.WithTimeout(ctx, setupTimeout())
 	defer cancel()
 	_ = labmanifest.RenderDir(e.labRoot)
 	if len(st.Setup) == 0 {
@@ -445,7 +468,7 @@ func (e *Engine) RunSolutionScript(ctx context.Context, script string) (logs str
 		return "", fmt.Errorf("setup not completed for this question")
 	}
 	var buf strings.Builder
-	ctx, cancel := context.WithTimeout(ctx, setupTimeout)
+	ctx, cancel := context.WithTimeout(ctx, setupTimeout())
 	defer cancel()
 	code, err := e.runShellWithEnv(ctx, script, &buf, nil, e.kubeEnv())
 	if err != nil {
