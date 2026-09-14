@@ -6,7 +6,7 @@ metadata:
   labels:
     app: demo-app
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       app: demo-app
@@ -22,9 +22,6 @@ spec:
           env:
             - name: CTF_RELAY_MODE
               value: active
-            # Stable across replicas so verify/solution agree under Service LB.
-            - name: FLAG
-              value: "CTF{gitops-demo-app}"
             # App serves under /ctf — Traefik Ingress needs no strip-prefix middleware.
             - name: BASE_PATH
               value: /ctf

@@ -176,12 +176,12 @@ tabs:
       type: question
       title: Scale replicas through Git
       description: |
-        **Platform ticket #4:** traffic is climbing.
+        **Platform ticket #4:** traffic dropped — scale back down.
 
-        In the Gitea repo, set Deployment **`demo-app`** **`spec.replicas`** to **2**, commit, and push.
-        Wait for Argo CD to sync so two pods are ready.
+        In the Gitea repo, set Deployment **`demo-app`** **`spec.replicas`** to **1**, commit, and push.
+        Wait for Argo CD to sync so only one pod is ready.
 
-        This step completes automatically when the Deployment has 2 ready replicas and the Application is **Synced**.
+        This step completes automatically when the Deployment has 1 ready replica and the Application is **Synced**.
       answer_type: observe
       poll_interval_seconds: 5
       correct_message: |
@@ -189,8 +189,8 @@ tabs:
       verify: |
         replicas=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.spec.replicas}' 2>/dev/null)
         ready=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
-        test "${replicas:-0}" = "2"
-        test "${ready:-0}" = "2"
+        test "${replicas:-0}" = "1"
+        test "${ready:-0}" = "1"
         sync=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null)
         test "$sync" = "Synced"
       solution_script: |
@@ -201,18 +201,18 @@ tabs:
         remote="$(bash scripts/gitea-http-remote.sh "${id}" "${id}")"
         git clone -q "${remote}" "$work/repo"
         cd "$work/repo"
-        sed -i 's/replicas: .*/replicas: 2/' deployment.yml
+        sed -i 's/replicas: .*/replicas: 1/' deployment.yml
         git config user.email "${id}@k3slab.local"
         git config user.name "${id}"
         git add deployment.yml
-        git commit -q -m "Scale demo-app to 2 replicas" || true
+        git commit -q -m "Scale demo-app to 1 replica" || true
         git push -q origin HEAD:main
         for i in $(seq 1 36); do
           kubectl -n argocd annotate application demo-app argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
           replicas=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.spec.replicas}' 2>/dev/null || true)
           ready=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)
           sync=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
-          if [[ "${replicas:-0}" == "2" && "${ready:-0}" == "2" && "$sync" == "Synced" ]]; then
+          if [[ "${replicas:-0}" == "1" && "${ready:-0}" == "1" && "$sync" == "Synced" ]]; then
             exit 0
           fi
           sleep 5
@@ -220,7 +220,7 @@ tabs:
         echo "timed out waiting for scale via GitOps" >&2
         exit 1
       hints:
-        - "Same student clone URL; set `replicas: 2` in `deployment.yml`, commit, push"
+        - "Same student clone URL; set `replicas: 1` in `deployment.yml`, commit, push"
         - "`kubectl get deploy demo-app -w` and `kubectl -n argocd get applications`"
 
     - id: question-source-of-truth
@@ -266,11 +266,7 @@ tabs:
         host="${K3SLAB_INGRESS_HOST:-localhost}"
         ready=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
         test "${ready:-0}" -ge 1
-        expected=$(curl -sS --max-time 5 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty' || true)
-        if [[ -z "${expected}" ]]; then
-          tip=$(kubectl -n kube-system get svc traefik -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
-          expected=$(curl -sS --max-time 5 -f -H "Host: ${host}" "http://${tip}/ctf/api/flag" | jq -r '.flag // empty' || true)
-        fi
+        expected=$(curl -sS --max-time 5 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty')
         test -n "$expected"
         test "$ANSWER" = "$expected"
       solution_answer_script: |

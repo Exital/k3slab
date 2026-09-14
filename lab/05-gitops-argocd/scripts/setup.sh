@@ -284,7 +284,7 @@ wait_demo_app_running() {
     if kubectl -n gitops-lab get deploy demo-app >/dev/null 2>&1; then
       ready="$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
       running="$(kubectl -n gitops-lab get pods -l app=demo-app --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')"
-      if [[ "${ready:-0}" -ge 1 || "${running:-0}" -ge 1 ]]; then
+      if [[ "${ready:-0}" -ge 2 || "${running:-0}" -ge 2 ]]; then
         echo "[gitops-lab] demo-app ready=${ready:-0} running=${running:-0} (t=$(elapsed)s)"
         return 0
       fi
