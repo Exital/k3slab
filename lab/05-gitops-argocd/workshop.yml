@@ -266,7 +266,13 @@ tabs:
         host="${K3SLAB_INGRESS_HOST:-localhost}"
         ready=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
         test "${ready:-0}" -ge 1
-        expected=$(curl -sS --max-time 5 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty')
+        # Prefer localhost (hostPort); nested K3s CI often needs Traefik ClusterIP instead.
+        expected=$(curl -sS --max-time 3 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' 2>/dev/null | jq -r '.flag // empty' || true)
+        if [[ -z "${expected}" ]]; then
+          tip=$(kubectl -n kube-system get svc traefik -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+          test -n "${tip}"
+          expected=$(curl -sS --max-time 5 -f -H "Host: ${host}" "http://${tip}/ctf/api/flag" | jq -r '.flag // empty')
+        fi
         test -n "$expected"
         test "$ANSWER" = "$expected"
       solution_answer_script: |
