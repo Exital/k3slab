@@ -248,13 +248,14 @@ tabs:
         **Platform ticket #5:** the app behind **`demo-app`** is the same CTF challenge from earlier labs
         (`ghcr.io/exital/simple-ctf`). It is running in **`gitops-lab`**, but nothing publishes it to the browser yet.
 
-        1. Create a **Traefik** Ingress (and strip-prefix Middleware if needed) so the Service **`demo-app`**
-           is available at **`http://<ingress-host>/ctf/`** (your machine hostname).
+        1. Create a **Traefik** Ingress so Service **`demo-app`** is available at
+           **`http://<ingress-host>/ctf/`** (your machine hostname).
+           The app already listens under the **`/ctf`** base path — you do **not** need a strip-prefix Middleware.
         2. Open that URL (or **`/ctf/api/flag`**) and capture the **flag**.
         3. Paste the flag here (e.g. `CTF{...}`).
 
-        Tip: Gitea already uses a Traefik Middleware + Ingress in this cluster — mirror that pattern for **`/ctf`**,
-        backend Service **`demo-app`** port **80** (it targets container port **3000**).
+        Tip: mirror the Gitea Ingress shape (host + path Prefix), backend Service **`demo-app`** port **80**
+        (it targets container port **3000**).
       answer_type: text
       correct_message: |
         Got it — Ingress is up and you pulled the flag from the CTF app.
@@ -265,31 +266,25 @@ tabs:
         host="${K3SLAB_INGRESS_HOST:-localhost}"
         ready=$(kubectl -n gitops-lab get deploy demo-app -o jsonpath='{.status.readyReplicas}' 2>/dev/null)
         test "${ready:-0}" -ge 1
-        expected=$(curl -sS --max-time 5 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty')
+        expected=$(curl -sS --max-time 5 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' | jq -r '.flag // empty' || true)
+        if [[ -z "${expected}" ]]; then
+          tip=$(kubectl -n kube-system get svc traefik -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+          expected=$(curl -sS --max-time 5 -f -H "Host: ${host}" "http://${tip}/ctf/api/flag" | jq -r '.flag // empty' || true)
+        fi
         test -n "$expected"
         test "$ANSWER" = "$expected"
       solution_answer_script: |
         set -euo pipefail
         host="${K3SLAB_INGRESS_HOST:-localhost}"
         ns=gitops-lab
+        kubectl -n "${ns}" wait --for=condition=available deploy/demo-app --timeout=180s >/dev/null 2>&1 || true
+        # Apply Ingress only (no Middleware). Silence kubectl so ANSWER is just the flag.
         kubectl -n "${ns}" apply -f - >/dev/null 2>&1 <<EOF
-        apiVersion: traefik.io/v1alpha1
-        kind: Middleware
-        metadata:
-          name: ctf-stripprefix
-          namespace: ${ns}
-        spec:
-          stripPrefix:
-            prefixes:
-              - /ctf
-        ---
         apiVersion: networking.k8s.io/v1
         kind: Ingress
         metadata:
           name: demo-app-ctf
           namespace: ${ns}
-          annotations:
-            traefik.ingress.kubernetes.io/router.middlewares: ${ns}-ctf-stripprefix@kubernetescrd
         spec:
           rules:
             - host: ${host}
@@ -303,19 +298,29 @@ tabs:
                         port:
                           number: 80
         EOF
-        for _ in $(seq 1 90); do
-          flag=$(curl -sS --max-time 3 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' 2>/dev/null | jq -r '.flag // empty' || true)
+        for _ in $(seq 1 120); do
+          flag=$(curl -sS --max-time 2 -f -H "Host: ${host}" 'http://127.0.0.1/ctf/api/flag' 2>/dev/null | jq -r '.flag // empty' || true)
           if [[ -n "${flag}" ]]; then
             printf '%s\n' "${flag}"
             exit 0
           fi
+          # Fallback: hit Traefik Service ClusterIP (nested K3s hostPort can be flaky in CI).
+          tip=$(kubectl -n kube-system get svc traefik -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
+          if [[ -n "${tip}" ]]; then
+            flag=$(curl -sS --max-time 2 -f -H "Host: ${host}" "http://${tip}/ctf/api/flag" 2>/dev/null | jq -r '.flag // empty' || true)
+            if [[ -n "${flag}" ]]; then
+              printf '%s\n' "${flag}"
+              exit 0
+            fi
+          fi
           sleep 2
         done
         echo "ctf flag endpoint not reachable" >&2
+        kubectl -n "${ns}" get ingress,svc,endpoints demo-app demo-app-ctf -o wide >&2 || true
         exit 1
       hints:
-        - "Create Middleware `stripPrefix: [/ctf]` and an Ingress path `/ctf` → Service `demo-app:80`"
-        - "Annotation: `traefik.ingress.kubernetes.io/router.middlewares: gitops-lab-ctf-stripprefix@kubernetescrd`"
+        - "Ingress path `/ctf` (Prefix) → Service `demo-app:80` — no strip-prefix Middleware needed"
+        - "`kubectl -n gitops-lab get ingress`"
         - "`curl -s -H \"Host: ${K3SLAB_INGRESS_HOST:-localhost}\" http://127.0.0.1/ctf/api/flag`"
 
   markdowns:

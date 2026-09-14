@@ -22,6 +22,12 @@ spec:
           env:
             - name: CTF_RELAY_MODE
               value: active
+            # Stable across replicas so verify/solution agree under Service LB.
+            - name: FLAG
+              value: "CTF{gitops-demo-app}"
+            # App serves under /ctf — Traefik Ingress needs no strip-prefix middleware.
+            - name: BASE_PATH
+              value: /ctf
           ports:
             - containerPort: 3000
               name: http
