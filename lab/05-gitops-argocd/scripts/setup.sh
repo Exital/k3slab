@@ -4,7 +4,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-export K3SLAB_INGRESS_HOST="${K3SLAB_INGRESS_HOST:-localhost}"
+# Ingress hosts must be lowercase RFC 1123 (macOS .local names are often mixed-case).
+export K3SLAB_INGRESS_HOST="$(printf '%s' "${K3SLAB_INGRESS_HOST:-localhost}" | tr '[:upper:]' '[:lower:]')"
 
 # Overall prepare budget (seconds). CI must not sit for 15–25m.
 SETUP_TIMEOUT_SEC="${K3SLAB_SETUP_TIMEOUT_SEC:-480}"
@@ -353,22 +354,25 @@ run_setup() {
   echo "[gitops-lab] pre-pull done t=$(elapsed)s"
   check_budget
 
+  # Note: do not wrap these in `cmd || die` — bash disables set -e inside
+  # functions invoked from ||/&& lists, which silently skipped Ingress apply
+  # failures (e.g. mixed-case macOS .local hostnames).
   progress 30 "Installing Gitea"
-  apply_gitea || die "Gitea setup failed"
+  apply_gitea
   check_budget
 
   progress 45 "Installing webhook proxy"
-  apply_webhook_proxy || die "webhook proxy failed"
+  apply_webhook_proxy
   check_budget
 
   progress 55 "Installing Argo CD"
   stage "bcrypt"
   BCRYPT_HASH="$(bcrypt_password "${STUDENT_ID}")" || die "bcrypt failed"
-  install_argocd "${BCRYPT_HASH}" || die "Argo CD install failed"
+  install_argocd "${BCRYPT_HASH}"
   check_budget
 
   progress 65 "Wiring Argo pod network"
-  wire_argocd_pod_network || die "pod network wiring failed"
+  wire_argocd_pod_network
   bash scripts/map-cluster-dns.sh
   check_budget
 

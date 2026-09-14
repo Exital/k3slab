@@ -26,7 +26,8 @@ source /usr/local/lib/k3slab/k3s-lifecycle.sh
 
 export LABS_ROOT="${LABS_ROOT:-/lab}"
 export LAB_ID="${LAB_ID:-01-kubectl-basics}"
-export K3SLAB_INGRESS_HOST="${K3SLAB_INGRESS_HOST:-localhost}"
+# Ingress hosts must be lowercase RFC 1123 (macOS .local names are often mixed-case).
+export K3SLAB_INGRESS_HOST="$(printf '%s' "${K3SLAB_INGRESS_HOST:-localhost}" | tr '[:upper:]' '[:lower:]')"
 
 rotate_k3s_log_if_needed() {
   [[ -f "${K3SLAB_K3S_LOG_FILE}" ]] || return 0

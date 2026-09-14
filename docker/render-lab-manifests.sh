@@ -9,7 +9,8 @@ if [[ -z "${lab_dir}" || ! -d "${lab_dir}" ]]; then
   exit 1
 fi
 
-export K3SLAB_INGRESS_HOST="${K3SLAB_INGRESS_HOST:-localhost}"
+# Ingress hosts must be lowercase RFC 1123 (macOS .local names are often mixed-case).
+export K3SLAB_INGRESS_HOST="$(printf '%s' "${K3SLAB_INGRESS_HOST:-localhost}" | tr '[:upper:]' '[:lower:]')"
 
 if [[ -f "${lab_dir}/scripts/render-manifests.sh" ]]; then
   (cd "${lab_dir}" && bash scripts/render-manifests.sh) || true
