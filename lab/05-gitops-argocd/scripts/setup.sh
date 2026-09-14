@@ -185,23 +185,34 @@ EOF
     --timeout 15m
   rm -f "${VALUES_FILE}"
 
-  echo "[gitops-lab] Waiting for Argo CD pods to be Running..."
+  # Require the components the Application controller talks to — a generic
+  # "3 Running pods" check can pass before repo-server is up (CI flake:
+  # ComparisonError lookup argocd-repo-server: i/o timeout).
+  echo "[gitops-lab] Waiting for Argo CD core components to be Running..."
   ok=0
-  for _ in $(seq 1 120); do
-    # Count Running pods from this Helm release (Ready may stay false if kubelet probes flake).
-    running="$(kubectl -n argocd get pods -l app.kubernetes.io/instance=argocd --no-headers 2>/dev/null | grep -c ' Running ' || true)"
-    total="$(kubectl -n argocd get pods -l app.kubernetes.io/instance=argocd --no-headers 2>/dev/null | grep -cv 'Completed\|Error' || true)"
-    if [[ "${total}" -ge 3 && "${running}" -ge 3 ]]; then
+  for _ in $(seq 1 180); do
+    rs_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-repo-server --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
+    srv_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-server --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
+    ctrl_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-application-controller --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
+    redis_phase="$(kubectl -n argocd get pods -l app.kubernetes.io/name=argocd-redis --no-headers 2>/dev/null | awk '{print $3}' | head -n1 || true)"
+    rs_ep="$(kubectl -n argocd get endpoints argocd-repo-server -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null || true)"
+    if [[ "${rs_phase}" == "Running" && "${srv_phase}" == "Running" && "${ctrl_phase}" == "Running" && "${redis_phase}" == "Running" && -n "${rs_ep}" ]]; then
       ok=1
       break
     fi
     sleep 2
   done
   if [[ "${ok}" != "1" ]]; then
-    echo "[gitops-lab] Argo CD pods not Running in time (running=${running:-0} total=${total:-0})" >&2
+    echo "[gitops-lab] Argo CD core components not Running in time (repo=${rs_phase:-?} server=${srv_phase:-?} ctrl=${ctrl_phase:-?} redis=${redis_phase:-?} ep=${rs_ep:-none})" >&2
     kubectl -n argocd get pods -o wide >&2 || true
+    kubectl -n argocd get endpoints argocd-repo-server -o wide >&2 || true
     return 1
   fi
+
+  # Give CoreDNS a moment after the Argo pod storm (GHA runners get lookup timeouts otherwise).
+  echo "[gitops-lab] Waiting for CoreDNS to be Running..."
+  kubectl -n kube-system wait --for=condition=Ready pod -l k8s-app=kube-dns --timeout=120s >/dev/null 2>&1 || true
+  sleep 3
 
   tmp_argocd_ing="$(mktemp)"
   if [[ -f manifests/argocd-ingress.yml.template ]]; then
@@ -309,12 +320,20 @@ bash scripts/configure-webhook.sh
 # Wait until Argo has synced once (Service selector bug => no endpoints is expected).
 progress 85 "Waiting for Application sync"
 echo "[gitops-lab] Waiting for Application demo-app to appear and sync..."
-for i in $(seq 1 90); do
+for i in $(seq 1 120); do
   sync=$(kubectl -n argocd get application demo-app -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
   if [[ "${sync}" == "Synced" || "${sync}" == "OutOfSync" ]]; then
     break
   fi
-  if (( i % 15 == 0 )); then
+  # Recover from transient CoreDNS / repo-server dial failures on cold CI runners.
+  if (( i % 10 == 0 )); then
+    cond="$(kubectl -n argocd get application demo-app -o jsonpath='{.status.conditions[0].message}' 2>/dev/null || true)"
+    if [[ "${cond}" == *argocd-repo-server* || "${cond}" == *i/o\ timeout* || "${cond}" == *connection\ error* ]]; then
+      echo "[gitops-lab] Application ComparisonError (${cond}); bouncing application-controller..." >&2
+      kubectl -n argocd delete pod -l app.kubernetes.io/name=argocd-application-controller --ignore-not-found >/dev/null 2>&1 || true
+      kubectl -n kube-system delete pod -l k8s-app=kube-dns --ignore-not-found >/dev/null 2>&1 || true
+      sleep 5
+    fi
     kubectl -n argocd annotate application demo-app argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
   fi
   sleep 2
@@ -323,8 +342,11 @@ kubectl -n argocd get application demo-app >/dev/null
 
 echo "[gitops-lab] Waiting for demo-app Deployment from Argo sync..."
 ok=0
-for _ in $(seq 1 90); do
+for i in $(seq 1 120); do
   if ! kubectl -n gitops-lab get deploy demo-app >/dev/null 2>&1; then
+    if (( i % 15 == 0 )); then
+      kubectl -n argocd annotate application demo-app argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
+    fi
     sleep 2
     continue
   fi
@@ -340,6 +362,7 @@ if [[ "${ok}" != "1" ]]; then
   echo "[gitops-lab] demo-app never became Running after Argo sync" >&2
   kubectl -n argocd get application demo-app -o wide >&2 || true
   kubectl -n argocd get application demo-app -o yaml 2>&1 | tail -80 >&2 || true
+  kubectl -n argocd get pods -o wide >&2 || true
   kubectl -n gitops-lab get deploy,pods,svc -o wide >&2 || true
   exit 1
 fi
